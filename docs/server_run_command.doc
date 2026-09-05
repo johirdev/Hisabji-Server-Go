@@ -1,0 +1,11 @@
+এখন server চালান:
+go run ./cmd/api
+
+Server বন্ধ করতে:
+Ctrl + C
+
+Redis container বন্ধ করতে:
+docker stop hisabji-redis
+
+আবার চালু করতে:
+docker start hisabji-redis

@@ -1,0 +1,35 @@
+pgAdmin থেকে hisabji database select করুন।
+Tools → Query Tool খুলুন।
+এই query চালান:
+
+SELECT
+    identifier,
+    COUNT(*) AS failed_attempts,
+    MIN(created_at) AS first_attempt,
+    MAX(created_at) AS last_attempt
+FROM login_attempts
+WHERE created_at > NOW() - INTERVAL '6 hours'
+GROUP BY identifier
+ORDER BY last_attempt DESC;
+
+
+সব record দেখতে:
+
+SELECT *
+FROM login_attempts
+ORDER BY created_at DESC;
+
+কোনো user-এর login lock reset করতে:
+
+DELETE FROM login_attempts
+WHERE identifier = 'raselkhan';
+
+সব login attempt reset করতে:
+
+TRUNCATE TABLE login_attempts;
+
+বর্তমান server বন্ধ করতে terminal-এ চাপুন:
+
+তারপর আবার চালান:
+go run ./cmd/api
+

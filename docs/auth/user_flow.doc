@@ -1,0 +1,336 @@
+============================================================
+Hisabji User Authentication এবং User Flow
+============================================================
+
+এই document বর্তমান server implementation অনুযায়ী তৈরি করা হয়েছে।
+
+Base URL:
+http://localhost:8080
+
+API Base URL:
+http://localhost:8080/api/v1
+
+
+১. প্রয়োজনীয় service চালু করা
+============================================================
+
+PostgreSQL database:
+
+Database name: hisabji
+Host: localhost
+Port: 5432
+
+Redis Docker container চালু করা:
+
+docker start hisabji-redis
+
+Redis connection test:
+
+docker exec hisabji-redis redis-cli PING
+
+Expected output:
+
+PONG
+
+যদি container আগে তৈরি না করা থাকে:
+
+docker run -d --name hisabji-redis --restart unless-stopped -p 6379:6379 -v hisabji-redis-data:/data redis:7-alpine redis-server --appendonly yes
+
+
+২. Environment configuration
+============================================================
+
+.env ফাইলে:
+
+APP_ENV=development
+PORT=8080
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/hisabji
+REDIS_URL=redis://localhost:6379/0
+JWT_SECRET=your-long-random-jwt-secret
+OTP_SECRET=your-long-random-otp-secret
+
+গুরুত্বপূর্ণ:
+
+- development mode-এ register response-এর মধ্যে OTP দেখা যাবে।
+- production mode-এ OTP response-এ ফেরত যাবে না। Production-এ SMS provider যুক্ত করতে হবে।
+- JWT_SECRET production-এ অবশ্যই পরিবর্তন করতে হবে।
+
+
+৩. Server চালু করা
+============================================================
+
+go run ./cmd/api
+
+Server চালু হলে:
+
+http://localhost:8080/
+
+Root response:
+
+{
+	"success": true,
+	"message": "Hisabji server is running",
+	"service": "Hisabji API",
+	"env": "development"
+}
+
+Database এবং Redis health check:
+
+GET http://localhost:8080/health
+
+
+৪. Registration flow
+============================================================
+
+ধাপ ১: User registration API hit করুন
+
+POST /api/v1/auth/register
+Content-Type: application/json
+
+curl -X POST http://localhost:8080/api/v1/auth/register ^
+	-H "Content-Type: application/json" ^
+	-d "{\"name\":\"Rasel Khan\",\"phone\":\"01700000000\",\"email\":\"rasel@example.com\",\"username\":\"raselkhan\",\"password\":\"12345678\"}"
+
+Server-এর ভিতরে কাজের sequence:
+
+১. Password bcrypt দিয়ে hash হয়।
+২. User record PostgreSQL-এর users table-এ insert হয়।
+৩. একটি ৬ digit OTP তৈরি হয়।
+৪. OTP-এর raw value নয়, SHA-256 hash PostgreSQL-এর phone_otps table-এ save হয়।
+৫. development mode হলে raw OTP response-এ ফেরত যায়।
+৬. Redis-এ register endpoint-এর IP rate-limit counter update হয়।
+
+Development response-এর উদাহরণ:
+
+{
+	"message": "verification OTP sent",
+	"otp": "123456",
+	"user": {
+		"phone": "01700000000",
+		"username": "raselkhan"
+	}
+}
+
+PostgreSQL tables:
+
+users       = user profile এবং password hash
+phone_otps  = OTP hash, expiry, consumed status
+
+
+৫. OTP verification flow
+============================================================
+
+POST /api/v1/auth/verify-otp
+Content-Type: application/json
+
+curl -X POST http://localhost:8080/api/v1/auth/verify-otp ^
+	-H "Content-Type: application/json" ^
+	-d "{\"phone\":\"01700000000\",\"otp\":\"123456\"}"
+
+Server-এর ভিতরে:
+
+১. Request-এর OTP hash করা হয়।
+২. PostgreSQL phone_otps table-এ phone, hash, expiry এবং consumed_at check হয়।
+৩. OTP valid হলে phone_otps.consumed_at update হয়।
+৪. users.phone_verified = true হয়।
+৫. OTP দ্বিতীয়বার ব্যবহার করা যায় না।
+৬. Redis rate-limit counter update হয়।
+
+Success response:
+
+{
+	"message": "phone verified"
+}
+
+Invalid বা expired OTP:
+
+{
+	"error": "invalid or expired OTP"
+}
+
+
+৬. Login flow এবং JWT token
+============================================================
+
+Phone, email অথবা username দিয়ে login করা যায়।
+
+POST /api/v1/auth/login
+Content-Type: application/json
+
+curl -X POST http://localhost:8080/api/v1/auth/login ^
+	-H "Content-Type: application/json" ^
+	-d "{\"identifier\":\"raselkhan\",\"password\":\"12345678\"}"
+
+Server-এর ভিতরে:
+
+১. PostgreSQL users table থেকে identifier দিয়ে user খোঁজা হয়।
+২. Password hash-এর সঙ্গে bcrypt comparison হয়।
+৩. ভুল password হলে login_attempts table-এ record insert হয়।
+৪. পাঁচটি failed attempt হলে ৬ ঘণ্টার lock হয়।
+৫. সঠিক password হলে login_attempts record delete হয়।
+৬. phone_verified false হলে login বন্ধ থাকে।
+৭. verification সফল হলে JWT token তৈরি হয়।
+৮. Redis login এবং global IP rate-limit counter update হয়।
+
+Success response:
+
+{
+	"user": { "id": "...", "phone": "01700000000" },
+	"token": "eyJ..."
+}
+
+পরবর্তী protected request-এ header দিতে হবে:
+
+Authorization: Bearer eyJ...
+
+ভুল password-এর ৫ বার পর response:
+
+{
+	"error": "too many failed attempts; try again after 6 hours"
+}
+
+
+৭. Current user endpoints
+============================================================
+
+বর্তমানে authentication-এর পর এই endpointগুলো available:
+
+PUT /api/v1/users/me
+PUT /api/v1/users/me/username
+DELETE /api/v1/users/me
+
+প্রতিটি request-এ JWT header প্রয়োজন।
+
+Profile update:
+
+curl -X PUT http://localhost:8080/api/v1/users/me ^
+	-H "Authorization: Bearer YOUR_TOKEN" ^
+	-H "Content-Type: application/json" ^
+	-d "{\"name\":\"Rasel Ahmed\",\"email\":\"new@example.com\",\"user_image_path\":\"/uploads/rasel.png\"}"
+
+Username setup/update:
+
+curl -X PUT http://localhost:8080/api/v1/users/me/username ^
+	-H "Authorization: Bearer YOUR_TOKEN" ^
+	-H "Content-Type: application/json" ^
+	-d "{\"username\":\"rasel_new\"}"
+
+Account delete:
+
+curl -X DELETE http://localhost:8080/api/v1/users/me ^
+	-H "Authorization: Bearer YOUR_TOKEN"
+
+বর্তমান code-এ GET /api/v1/users/me endpoint এখনো নেই।
+User profile পড়ার জন্য এই endpoint পরবর্তী ধাপে implement করতে হবে।
+
+
+৮. PostgreSQL বনাম Redis data responsibility
+============================================================
+
+PostgreSQL হলো permanent source of truth:
+
+users:
+- name, phone, email, username
+- password_hash
+- user_image_path
+- phone_verified
+- plan এবং user metadata
+
+phone_otps:
+- OTP-এর hash
+- OTP expiry
+- consumed_at
+
+login_attempts:
+- ভুল password attempt
+- ৬ ঘণ্টার failed-login lock হিসাব
+
+Redis-এ শুধু temporary distributed rate-limit counter থাকে:
+
+rl:global:<ip>
+rl:auth:register:<ip>
+rl:auth:login:<ip>
+rl:auth:verify-otp:<ip>
+rl:user:update:<ip>
+rl:user:username:<ip>
+rl:user:delete:<ip>
+
+Redis value সাধারণত request count এবং TTL:
+
+GET rl:auth:login:127.0.0.1
+TTL rl:auth:login:127.0.0.1
+
+Redis-এ রাখা হয় না:
+
+- password
+- raw OTP
+- JWT token
+- user profile
+
+
+৯. Redis keys দেখা এবং reset করা
+============================================================
+
+Redis shell খুলুন:
+
+docker exec -it hisabji-redis redis-cli
+
+সব rate-limit key দেখুন:
+
+SCAN 0 MATCH rl:* COUNT 100
+
+একটি key-এর count দেখুন:
+
+GET rl:auth:login:127.0.0.1
+
+Key-এর অবশিষ্ট TTL দেখুন:
+
+TTL rl:auth:login:127.0.0.1
+
+একটি rate-limit key reset:
+
+DEL rl:auth:login:127.0.0.1
+
+সব Redis rate-limit key reset:
+
+EVAL "for _,k in ipairs(redis.call('keys','rl:*')) do redis.call('del',k) end return 1" 0
+
+সতর্কতা: production-এ নির্দিষ্ট key ছাড়া সব key delete করবেন না।
+
+
+১০. PostgreSQL lock দেখা এবং reset করা
+============================================================
+
+pgAdmin Query Tool-এ:
+
+SELECT identifier, COUNT(*) AS failed_attempts,
+			 MIN(created_at) AS first_attempt,
+			 MAX(created_at) AS last_attempt
+FROM login_attempts
+WHERE created_at > NOW() - INTERVAL '6 hours'
+GROUP BY identifier
+ORDER BY last_attempt DESC;
+
+একজন user-এর failed-login lock reset:
+
+DELETE FROM login_attempts
+WHERE identifier = 'raselkhan';
+
+সব failed-login record reset:
+
+TRUNCATE TABLE login_attempts;
+
+
+১১. End-to-end সংক্ষিপ্ত flow
+============================================================
+
+১. PostgreSQL এবং Redis চালু করুন।
+২. go run ./cmd/api চালান।
+৩. POST /api/v1/auth/register hit করুন।
+৪. Development response থেকে OTP নিন।
+৫. POST /api/v1/auth/verify-otp hit করুন।
+৬. POST /api/v1/auth/login hit করুন।
+৭. Response থেকে JWT token নিন।
+৮. Bearer token দিয়ে user update বা username setup করুন।
+৯. Redis-এ rl:* keys এবং PostgreSQL-এ users/phone_otps/login_attempts দেখুন।
+
