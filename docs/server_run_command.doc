@@ -1,11 +1,126 @@
-এখন server চালান:
-go run ./cmd/api
+Hisabji Server চালানোর production-style command guide
+======================================================
+
+প্রথমবার setup:
+
+১. Docker Desktop চালু করুন।
+২. Project root-এ যান:
+
+cd ~/Desktop/coders24/business/Hisabji/hisabji-server/Hisabji-Server
+
+৩. .env ফাইলে JWT_SECRET এবং OTP_SECRET-এর secure value দিন।
+৪. PostgreSQL, Redis এবং API একসাথে build/start করুন:
+
+docker compose up -d --build
+
+Service status দেখুন:
+
+docker compose ps
+
+API log দেখুন:
+
+docker compose logs -f api
+
+Server test করুন:
+
+curl http://localhost:8080/
+curl http://localhost:8080/health
+
+Expected health response:
+
+{"status":"ok"}
+
+
+পরেরবার server চালু করতে:
+=========================
+
+docker compose up -d
+
+
+Docker + Air hot reload development mode:
+==========================================
+
+প্রথমবার অথবা code পরিবর্তনের পর:
+
+docker compose --profile dev up -d --build
+
+এই mode-এ source code container-এ mount হবে। Go file save করলেই Air server rebuild এবং restart করবে।
+
+Development log:
+
+docker compose logs -f api-dev
+
+Development status:
+
+docker compose --profile dev ps
+
+Development mode বন্ধ:
+
+docker compose --profile dev stop api-dev
+
+Production API চালানোর সময় আগে dev API বন্ধ করুন:
+
+docker compose --profile dev stop api-dev
+docker compose --profile prod up -d --build
+
+Production API বন্ধ:
+
+docker compose --profile prod stop api
+
+Code পরিবর্তনের পর নতুন image build করতে:
+
+docker compose up -d --build
+
 
 Server বন্ধ করতে:
-Ctrl + C
+==================
 
-Redis container বন্ধ করতে:
-docker stop hisabji-redis
+Container বন্ধ রাখবে, কিন্তু data থাকবে:
 
-আবার চালু করতে:
-docker start hisabji-redis
+docker compose stop
+
+Container remove করবে, কিন্তু named volume data থাকবে:
+
+docker compose down
+
+সবকিছু remove করতে, including PostgreSQL/Redis data:
+
+docker compose down -v
+
+সতর্কতা: down -v দিলে database এবং Redis-এর সব data মুছে যাবে।
+
+
+Redis দেখা:
+===========
+
+docker compose exec redis redis-cli PING
+docker compose exec redis redis-cli SCAN 0 MATCH "rl:*" COUNT 100
+docker compose exec redis redis-cli DBSIZE
+
+
+PostgreSQL দেখা:
+================
+
+docker compose exec postgres psql -U postgres -d hisabji
+
+তারপর:
+
+SELECT * FROM users;
+SELECT * FROM phone_otps ORDER BY created_at DESC;
+SELECT * FROM login_attempts ORDER BY created_at DESC;
+
+
+শুধু infrastructure চালিয়ে local Go server চালানো:
+====================================================
+
+docker compose up -d postgres redis
+go run ./cmd/api
+
+Local mode-এ .env-এর DATABASE_URL localhost:5432 এবং REDIS_URL localhost:6379 ব্যবহার হবে।
+
+
+পুরনো manual command-এর পরিবর্তে:
+===================================
+
+docker start hisabji-redis ব্যবহার করার প্রয়োজন নেই।
+Compose নিজে container তৈরি, start, stop এবং restart করবে।
