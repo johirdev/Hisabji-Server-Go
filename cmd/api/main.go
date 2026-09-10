@@ -1,95 +1,133 @@
+// Command api is the Hisabji HTTP server.
 package main
 
 import (
 	"context"
-	"log"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
+	// Embeds the IANA timezone database in the binary. Without it, a scratch or
+	// alpine container has no /usr/share/zoneinfo, LoadLocation("Asia/Dhaka")
+	// fails, and every daily total silently shifts to UTC — a bug that only
+	// appears in production and looks like a calculation error.
+	_ "time/tzdata"
+
+	"github.com/johirdev/Hisabji-Server/internal/app"
 	"github.com/johirdev/Hisabji-Server/internal/config"
-	"github.com/johirdev/Hisabji-Server/internal/infrastructure/database"
+	"github.com/johirdev/Hisabji-Server/internal/core/logger"
 	"github.com/johirdev/Hisabji-Server/internal/shared/banner"
 )
 
 func main() {
-	cfg, e := config.Load()
-	if e != nil {
-		log.Fatal(e)
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "\nhisabji: %v\n\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	// The boot context is cancelled by SIGINT/SIGTERM, so a Ctrl+C during a long
+	// migration stops cleanly instead of leaving a half-applied schema.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	db, e := database.Open(ctx, cfg.DatabaseURL)
-	if e != nil {
-		log.Fatal(e)
+	application, err := app.New(ctx, cfg)
+	if err != nil {
+		return err
 	}
-	defer db.Close()
-	redisClient, e := database.OpenRedis(cfg.RedisURL)
-	if e != nil {
-		log.Fatalf("redis configuration failed: %v", e)
-	}
-	defer redisClient.Close()
-	if e = redisClient.Ping(ctx).Err(); e != nil {
-		log.Fatalf("redis connection failed: %v", e)
-	}
-
-	dbOk := true
-	if e = db.Ping(ctx); e != nil {
-		dbOk = false
-		log.Fatalf("database connection failed: %v", e)
-	}
-	if e = database.EnsureSchema(ctx, db); e != nil {
-		log.Fatalf("database schema initialization failed: %v", e)
-	}
+	defer application.Close()
 
 	server := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           setupRoutes(db, redisClient, cfg),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		Addr:    cfg.Server.Addr(),
+		Handler: application.Router(),
+
+		// Every one of these timeouts exists to stop one specific attack or bug:
+		//
+		//   ReadHeaderTimeout  a Slowloris client that sends headers one byte at
+		//                      a time and holds a connection open forever
+		//   ReadTimeout        a client that stalls mid-body
+		//   WriteTimeout       a handler that hangs on a slow dependency
+		//   IdleTimeout        keep-alive connections accumulating until the
+		//                      process runs out of file descriptors
+		//
+		// A server with no timeouts stays up for weeks and then falls over all at
+		// once, which is the hardest kind of outage to diagnose.
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
+
+		ErrorLog: nil, // gin logs through our structured logger instead
 	}
 
 	serverErrors := make(chan error, 1)
-	go func() { serverErrors <- server.ListenAndServe() }()
-
-	// Give ListenAndServe a brief moment to fail fast (e.g. port already in
-	// use) before printing the "up and running" banner.
-	select {
-	case e := <-serverErrors:
-		if e != nil && e != http.ErrServerClosed {
-			log.Fatal(e)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+			return
 		}
-	case <-time.After(150 * time.Millisecond):
-		banner.Print(banner.Info{
-			AppName:   "Hisabji API",
-			Port:      cfg.Port,
-			Env:       cfg.Env,
-			DBOk:      dbOk,
-			StartedAt: time.Now(),
-		})
+		serverErrors <- nil
+	}()
+
+	// Give ListenAndServe a moment to fail fast — a port already in use should
+	// print the real error, not a cheerful "up and running" banner.
+	select {
+	case err := <-serverErrors:
+		if err != nil {
+			return fmt.Errorf("the server could not start: %w", err)
+		}
+		return nil
+	case <-time.After(200 * time.Millisecond):
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
+	dbOK, _ := application.Health(ctx)
+	banner.Print(banner.Info{
+		AppName:   cfg.App.Name,
+		Port:      cfg.Server.Port,
+		Env:       cfg.App.Env,
+		DBOk:      dbOK,
+		StartedAt: time.Now(),
+	})
 
+	// ---- wait for a shutdown signal or a server failure --------------------
 	select {
-	case e = <-serverErrors:
-		if e != nil && e != http.ErrServerClosed {
-			log.Fatal(e)
+	case err := <-serverErrors:
+		if err != nil {
+			return fmt.Errorf("the server stopped unexpectedly: %w", err)
 		}
-	case <-stop:
-		log.Println("shutting down gracefully...")
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer shutdownCancel()
-		if e = server.Shutdown(shutdownCtx); e != nil {
-			log.Printf("server shutdown failed: %v", e)
-		} else {
-			log.Println("server stopped cleanly")
+		return nil
+
+	case <-ctx.Done():
+		stop() // restore default signal handling: a second Ctrl+C kills at once
+		logger.Named("server").Info("shutdown signal received, draining connections",
+			"timeout", cfg.Server.ShutdownTimeout.String())
+
+		// Graceful shutdown finishes in-flight requests before exiting. Without
+		// it, a deploy drops every request that happened to be mid-flight —
+		// including a payment confirmation that had already taken the money.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Named("server").Error("graceful shutdown timed out; closing forcibly",
+				"error", err.Error())
+			_ = server.Close()
+			return fmt.Errorf("shutdown did not complete within %s: %w",
+				cfg.Server.ShutdownTimeout, err)
 		}
+
+		logger.Named("server").Info("server stopped cleanly")
+		return nil
 	}
 }

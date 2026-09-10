@@ -1,6 +1,0 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE TABLE IF NOT EXISTS users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(100) NOT NULL, username varchar(30) UNIQUE, email varchar(255) UNIQUE, phone varchar(30) NOT NULL UNIQUE, password_hash text NOT NULL, user_image_path text, user_type varchar(30) NOT NULL DEFAULT 'user', plan varchar(30) NOT NULL DEFAULT 'free', ai_predictions_used integer NOT NULL DEFAULT 0, ai_predictions_limit integer NOT NULL DEFAULT 5, phone_verified boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
-CREATE TABLE IF NOT EXISTS phone_otps (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), phone varchar(30) NOT NULL, code_hash char(64) NOT NULL, expires_at timestamptz NOT NULL, consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now());
-CREATE INDEX IF NOT EXISTS phone_otps_rate_idx ON phone_otps(phone, created_at);
-CREATE TABLE IF NOT EXISTS login_attempts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), identifier varchar(255) NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
-CREATE INDEX IF NOT EXISTS login_attempts_rate_idx ON login_attempts(identifier, created_at);
