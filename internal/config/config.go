@@ -253,7 +253,7 @@ func Load() (Config, error) {
 
 	c := Config{
 		App: App{
-			Name:     str("APP_NAME", "Hisabji API"),
+			Name:     str("APP_NAME", "Hisabji API TEST"),
 			Env:      env,
 			Version:  str("APP_VERSION", "1.0.0"),
 			BaseURL:  strings.TrimSuffix(str("APP_BASE_URL", "http://localhost:8080"), "/"),

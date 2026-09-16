@@ -69,7 +69,7 @@ func Print(info Info) {
 	divider := blue + "═══════════════════════════════════════════════════" + reset
 	appName := info.AppName
 	if appName == "" {
-		appName = "Hisabji API"
+		appName = "Hisabji API TEST"
 	}
 
 	fmt.Println()
@@ -92,7 +92,7 @@ func printPlain(info Info) {
 	}
 	appName := info.AppName
 	if appName == "" {
-		appName = "Hisabji API"
+		appName = "Hisabji API TEST"
 	}
 	fmt.Println()
 	fmt.Println("=====================================================")

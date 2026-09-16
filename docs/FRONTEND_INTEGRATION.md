@@ -1,35 +1,52 @@
 # Hisabji — Frontend Integration Contract
 
-**Single source of truth for building the Next.js client against the Hisabji Go API.**
+**Single source of truth for building the Hisabji web client (user app + admin panel)
+against the Hisabji Go API.**
 
-Version: 1.0 · API: `v1` · Last verified against a live server: all shapes in this
-document were captured from real responses, not written from memory.
+Version 2.1 · API `v1` · Every request and response body in §6 was **captured from a
+live server**, not written from memory. Backend smoke suite: 80/80 passing.
+
+**Re-verified against the source on 2026-09-11.** All 30 endpoints, their paths,
+auth requirements and rate limits are unchanged. Thirteen corrections were applied
+to error tables and two response bodies — see [§6.6](#66-changelog--21).
+
+> **Backend-side endpoint reference:** [`docs/api/`](api/README.md) documents the same
+> endpoints from the server's point of view — request, response, every error, and the
+> route → handler → service → repository → SQL path each one takes. Use this file to
+> *build the client*; use `docs/api/` to understand *why the server answers the way it
+> does*. If the two ever disagree, the code is right and both are stale.
 
 ---
 
 ## 0. How to use this file
 
 If you are an AI assistant or a developer generating the frontend, read this file
-first and treat it as binding. Specifically:
+first and treat it as binding.
 
-1. **Never invent an endpoint.** Section 5 lists every endpoint that exists today.
-   Section 6 lists endpoints that are planned but **not yet implemented** — you may
-   build UI and typed stubs against them, but they will return `404 ROUTE_NOT_FOUND`
-   until the backend ships them. Mark such screens as gated behind a feature flag.
-2. **Never invent a response shape.** Every response is the envelope in §3.2. The
-   `data` payloads are typed in §7.
-3. **Never parse error strings.** Branch on `code` (§3.4). The `message` is for
-   display only and may be reworded at any time.
-4. **Money is never a float you compute with.** See §3.6.
-5. **Follow the design system in §10 exactly** — tokens, not ad-hoc values.
+**The rules:**
 
-Prompt to use when handing this to an assistant:
+1. **Work one step at a time.** §3 is an ordered build plan. Each step wires **one
+   endpoint** to **one screen** and ends in a state you can click. Do not skip
+   ahead, and do not build three screens in one pass.
+2. **Never invent an endpoint.** §6 lists every endpoint that exists today. §7 lists
+   what is planned but **not built** — those return `404 ROUTE_NOT_FOUND` right now,
+   so build them behind a flag that defaults to off.
+3. **Never invent a response shape.** Everything is the envelope in §4.2; the
+   payloads are typed in §8 and shown as real JSON in §6.
+4. **Never parse error strings.** Branch on `code` (§4.3). `message` is display-only
+   and may be reworded at any time.
+5. **Money is never a float you compute with.** See §4.5.
+6. **Every user-visible string goes through i18next** (§11). No hardcoded Bangla or
+   English in a component, ever — that is what makes the third language cheap.
+7. **Use the design tokens in §12.** No ad-hoc colours, radii or spacing.
 
-> Read `docs/FRONTEND_INTEGRATION.md`. Build the Hisabji Next.js frontend
-> following it exactly: the stack in §1, the API client in §8, the design tokens
-> in §10, and the screens in §11. Do not invent endpoints or response shapes. For
-> anything in §6, generate the screen but gate it behind `flags.<name>` defaulting
-> to off.
+**Prompt to hand an assistant:**
+
+> Read `docs/FRONTEND_INTEGRATION.md`. Execute **step `<N>`** of the build plan in
+> §3 and nothing else. Use the exact request/response contract in §6, the types in
+> §8, the API client in §9, i18next per §11 and the design tokens in §12. Do not
+> invent endpoints or response shapes. When the step is done, list what you built
+> and what to verify by hand.
 
 ---
 
@@ -37,61 +54,163 @@ Prompt to use when handing this to an assistant:
 
 | Concern | Choice | Why this one |
 |---|---|---|
-| Framework | **Next.js 15+ (App Router)** | Server Components let the dashboard render with data already fetched; Route Handlers give us the BFF token layer in §4. |
-| Language | **TypeScript**, `strict: true` | The API contract is large; types are what stop it drifting. |
-| Styling | **Tailwind CSS v4** | Design tokens in §10 map 1:1 onto `@theme` CSS variables. |
-| Components | **shadcn/ui** (Radix primitives) | Copy-in, not a dependency — so the tokens in §10 apply cleanly. Accessible by default. |
-| Server state | **TanStack Query v5** | The API is REST with a pagination envelope; Query handles caching, refetch and optimistic updates. **Do not use it for auth tokens.** |
-| Client state | **Zustand** | Tiny. Only for UI state (sheet open, active filter, locale). |
-| Forms | **react-hook-form + zod** | The API returns per-field errors (§3.5) that map straight onto `setError`. |
-| Charts | **Recharts** | Composable, works with the category colors the API already returns. |
-| Icons | **lucide-react** | **Required** — the API returns lucide icon names (§3.9). |
-| Dates | **date-fns** + `date-fns-tz` | The API works in `Asia/Dhaka` dates, not UTC timestamps. |
-| i18n | **next-intl** | Bangla-first with English fallback; see §10.8. |
+| Framework | **Next.js 15+ (App Router)** | Server Components render the dashboard with data already fetched; Route Handlers give us the BFF token layer in §5. |
+| Language | **TypeScript**, `strict: true` | The contract is large; types are what stop it drifting. |
+| Styling | **Tailwind CSS v4** | The tokens in §12 map 1:1 onto `@theme` CSS variables. |
+| Components | **shadcn/ui** (Radix primitives) | Copy-in, not a dependency — the tokens apply cleanly. Accessible by default. |
+| Server state | **TanStack Query v5** | REST + pagination envelope; handles caching, refetch, optimistic updates. **Never store auth tokens in it.** |
+| Client state | **Zustand** | Tiny. UI state only (sheet open, active filter). |
+| Forms | **react-hook-form + zod** | The API returns per-field errors (§4.4) that map straight onto `setError`. |
+| Charts | **Recharts** | Composable, works with the category colours the API returns. |
+| Icons | **lucide-react** | **Required** — the API returns lucide icon names (§4.9). |
+| Dates | **date-fns** + `date-fns-tz` | The API works in `Asia/Dhaka` calendar dates, not UTC instants. |
+| **i18n** | **i18next + react-i18next** | Bangla ⇄ English switching, adding a language later = drop in one folder. Full wiring in §11. |
+| Tables (admin) | **TanStack Table v8** | The admin panel is mostly tables; sorting/paging maps onto §4.7. |
 | Toasts | **sonner** | |
-| Fonts | `next/font/google` | See §10.3. |
+| Fonts | `next/font/google` | See §12.3. |
 
 ```bash
 npx create-next-app@latest hisabji-web --typescript --tailwind --app --src-dir --import-alias "@/*"
 cd hisabji-web
 npx shadcn@latest init
-npm i @tanstack/react-query zustand react-hook-form zod @hookform/resolvers \
-      recharts lucide-react date-fns date-fns-tz next-intl sonner
+
+npm i @tanstack/react-query @tanstack/react-table zustand \
+      react-hook-form zod @hookform/resolvers \
+      recharts lucide-react date-fns date-fns-tz sonner
+
+# i18n
+npm i i18next react-i18next i18next-resources-to-backend \
+      i18next-browser-languagedetector accept-language
 ```
 
-**Do not install:** axios (native `fetch` is enough and works in RSC), moment,
-any CSS-in-JS library, any state library beyond the two above.
+**Do not install:** axios (native `fetch` works in RSC), moment, any CSS-in-JS
+library, `next-intl` (we use i18next), any state library beyond the two above.
 
 ---
 
 ## 2. Environment
 
 ```bash
-# .env.local  — server-only. There is deliberately NO NEXT_PUBLIC_API_URL:
-# the browser never talks to the Go API directly. See §4.
+# .env.local — server-only. There is deliberately NO NEXT_PUBLIC_API_URL:
+# the browser never talks to the Go API directly. See §5.
 HISABJI_API_URL=http://localhost:8080
-AUTH_COOKIE_SECRET=<32+ random chars>
 NODE_ENV=development
 ```
 
-Run the backend first:
+Start the backend first (details in `docs/server_run_command.doc`):
 
 ```bash
 cd Hisabji-Server
 docker compose up -d postgres redis
 go run ./cmd/api            # http://localhost:8080
-bash scripts/smoke.sh       # 80 checks, should all pass
+bash scripts/smoke.sh       # 80 checks, all should pass
 ```
 
-> **Note on ports:** the Docker containers publish Postgres on **5433** and Redis on
-> **6380** (not the defaults), because a native Windows PostgreSQL service was
-> already bound to 5432. The API itself is on **8080**.
+> **Ports:** Postgres is published on **5433** and Redis on **6380** (not the
+> defaults). The API is on **8080**.
 
 ---
 
-## 3. API contract fundamentals
+## 3. Build plan — step by step
 
-### 3.1 Base URL and headers
+Each step is one sitting. A step is **done** when its checklist passes; only then
+move to the next. The "Endpoint" column points at the exact contract in §6.
+
+### Phase 0 — Skeleton (no API calls yet)
+
+| Step | What to build | Endpoint | Done when |
+|---|---|---|---|
+| **0.1** | `create-next-app`, install deps, Tailwind `@theme` tokens (§12.2), fonts (§12.3) | — | `/` renders "Hisabji" in Anek Bangla, dark mode follows the OS. |
+| **0.2** | i18next wiring (§11): `[locale]` segment, server `getT`, client `useT`, `bn`+`en` `common.json`, `<LanguageSwitcher/>` | — | `/bn` and `/en` both render; the switcher flips text and `<html lang>`. |
+| **0.3** | `src/types/api.ts` (§8), `ApiError` (§9.1), `lib/api/server.ts` (§9.2), the proxy `app/api/hisabji/[...path]/route.ts` (§9.3), `lib/api/client.ts` (§9.4) | `GET /health` | A `/debug` page shows `status: ok` fetched **through the proxy**. |
+| **0.4** | `QueryClientProvider` + global error handler (§10.2) + `<Toaster/>` | — | Throwing an `ApiError` in a test query shows one toast, not a crash. |
+
+### Phase 1 — Authentication
+
+| Step | Screen | Endpoint | Done when |
+|---|---|---|---|
+| **1.1** | `/register` | `POST /auth/register` (§6.2.1) | Valid form → 201, redirect to `/verify-otp`. A `12345` phone shows the inline field error, **not** a toast. |
+| **1.2** | `/verify-otp` | `POST /auth/verify-otp` (§6.2.2), `POST /auth/resend-otp` (§6.2.3) | 6 boxes, auto-advance, paste. Wrong code shows `attempts_left`. Resend disabled for `resend_after_seconds`. Dev banner shows `dev_otp`. |
+| **1.3** | `/login` | `POST /auth/login` (§6.2.4) | Cookies set by the route handler (§9.5); `requires_verification: true` routes to `/verify-otp` instead of the dashboard. |
+| **1.4** | Silent refresh | `POST /auth/refresh` (§6.2.5) | Single-flight lock in the proxy. Set `ACCESS_TOKEN_TTL=60s` on the server and confirm the app never logs itself out. |
+| **1.5** | `/forgot-password`, `/reset-password` | §6.2.6, §6.2.7 | Same OTP component reused. After reset, all sessions ended; user must sign in again. |
+| **1.6** | `AppShell` + route guard | `GET /users/me` (§6.3.2) | Signed out → `/login`. `onboarding_step !== "done"` → `/onboarding/<step>`. Otherwise the shell with bottom nav. |
+
+### Phase 2 — Onboarding
+
+| Step | Screen | Endpoint | Done when |
+|---|---|---|---|
+| **2.1** | `/onboarding/[step]` (profile → income → categories → budget → done) | `POST /users/me/onboarding` (§6.3.6) | Progress survives a reload — the step comes from the server, never from local state. |
+| **2.2** | Username picker | `GET /users/username-available` (§6.3.1), `PUT /users/me/username` (§6.3.5) | Debounced 400ms check; `admin` shows "reserved" plus the `suggestions`. |
+
+### Phase 3 — Account & settings
+
+| Step | Screen | Endpoint | Done when |
+|---|---|---|---|
+| **3.1** | `/settings/profile` | `PATCH /users/me` (§6.3.3) | Partial update: changing only the name leaves the email untouched. Empty submit → `BAD_REQUEST` handled. |
+| **3.2** | `/settings/preferences` | `PATCH /users/me/preferences` (§6.3.4) | The language switcher **also** persists `locale` here when signed in (§11.6). |
+| **3.3** | `/settings/devices` | `GET /auth/sessions` (§6.2.9), `DELETE /auth/sessions/:id` (§6.2.10) | Current device badged via `is_current`; revoking another device removes the row. |
+| **3.4** | Change password | `POST /auth/change-password` (§6.2.11) | Shows `other_sessions_ended`. |
+| **3.5** | Delete account | `DELETE /users/me` (§6.3.7) | Requires password + the literal word `DELETE`. |
+
+### Phase 4 — Billing (the commercial surface)
+
+| Step | Screen | Endpoint | Done when |
+|---|---|---|---|
+| **4.1** | `/pricing` (public) | `GET /billing/plans` (§6.4.1) | Prices come from the API. `is_popular` badged, `savings_percent` shown, `is_current_plan` marked when signed in. |
+| **4.2** | Credit-pack store | `GET /billing/credit-packs` (§6.4.2) | Shows `total_credits` (credits + bonus) and `price_per_credit`. |
+| **4.3** | Feature catalogue | `GET /billing/features` (§6.4.3) | Rendered from `by_category`; no category names hardcoded. |
+| **4.4** | `/billing` overview | `GET /billing/me` (§6.4.4), `GET /billing/wallet` (§6.4.5) | Allowance and purchased credits shown **separately**, plus the total. |
+| **4.5** | Credit history + payments | `GET /billing/ledger` (§6.4.6), `GET /billing/payments` (§6.4.7) | Pagination driven by `meta.has_next`, not by counting rows. |
+| **4.6** | Gated action button | `GET /billing/features/:code/access` (§6.4.8) | Button label is data-driven per the matrix in §6.5. |
+| **4.7** | Buy credits flow | `POST /billing/credits/buy` (§6.4.9) → `POST /billing/payments/confirm` (§6.4.12) | One idempotency key per checkout; replay shows `already_processed`. Wallet updates to 63 after a `tokens_60` purchase on 3 credits. |
+| **4.8** | Subscribe / cancel | `POST /billing/subscribe` (§6.4.10), `POST /billing/subscription/cancel` (§6.4.11) | Second live subscription → `CONFLICT` handled. Cancel keeps access until `ends_at`. |
+| **4.9** | **Global paywall sheet** | any `402` | One handler (§10.2) opens it for all four 402 codes with the right tab preselected (§13.1). |
+
+### Phase 5 — Core money features (backend not shipped yet)
+
+Build **behind flags**, against the stub types in §7. Each screen renders from a
+fixture until the endpoint exists, and flips over with a one-line change.
+
+| Step | Screen | Planned endpoint |
+|---|---|---|
+| **5.1** | Dashboard (`safe_to_spend_today` is the hero number) | `GET /dashboard` |
+| **5.2** | Add-expense sheet | `POST /expenses` |
+| **5.3** | Expense list, grouped by day | `GET /expenses` |
+| **5.4** | Categories | `GET/POST/PATCH/DELETE /categories` |
+| **5.5** | Budget | `GET /budgets/current`, `PUT /budgets/:id/limits` |
+| **5.6** | Goals | `GET /goals`, `POST /goals/:id/contribute` |
+| **5.7** | Analytics | `GET /analytics/*` |
+| **5.8** | AI actions (spend credits) | `POST /ai/:feature_code` |
+
+### Phase 6 — Admin panel (backend not shipped yet)
+
+See §14. Same rule: build the shell and the tables now, flag-gated, and wire them
+when `/api/v1/admin/*` lands.
+
+| Step | Screen | Planned endpoint |
+|---|---|---|
+| **6.1** | Admin shell + role guard (`user.role === "admin"`) | `GET /users/me` (already live) |
+| **6.2** | Overview KPIs | `GET /admin/stats` |
+| **6.3** | Users table + detail drawer | `GET /admin/users`, `GET /admin/users/:id` |
+| **6.4** | User actions (suspend, unlock, adjust credits) | `PATCH /admin/users/:id`, `POST /admin/users/:id/credits` |
+| **6.5** | Payments / revenue | `GET /admin/payments`, `GET /admin/revenue` |
+| **6.6** | Catalogue editor (plans, packs, features) | `PATCH /admin/plans/:code`, … |
+
+### Phase 7 — Polish
+
+| Step | What | Done when |
+|---|---|---|
+| **7.1** | Skeletons + empty states everywhere | No spinner on any list. |
+| **7.2** | Bangla layout pass | Every screen readable at 360px with long Bangla labels wrapping to two lines. |
+| **7.3** | Dark mode + contrast audit | §12.7 passes. |
+| **7.4** | Keyboard + screen-reader pass | §15 checklist green. |
+
+---
+
+## 4. API contract fundamentals
+
+### 4.1 Base URL and headers
 
 ```
 Base:    {HISABJI_API_URL}/api/v1
@@ -101,14 +220,14 @@ Base:    {HISABJI_API_URL}/api/v1
 |---|---|---|
 | `Content-Type` | every request with a body | `application/json` |
 | `Authorization` | authenticated endpoints | `Bearer <access_token>` |
-| `Accept-Language` | always | `bn` or `en` — drives `message_bn` selection |
+| `Accept-Language` | always | `bn` or `en` — selects which server message the UI should prefer |
 | `X-Request-ID` | optional | your own correlation id; echoed back |
-| `X-Idempotency-Key` | **required on purchases** | see §3.8 |
+| `X-Idempotency-Key` | **required on purchases** | see §4.8 |
 
 Non-versioned endpoints (outside `/api/v1`): `GET /`, `GET /health`,
 `GET /health/live`, `GET /health/ready`.
 
-### 3.2 The response envelope
+### 4.2 The response envelope
 
 **Every** response — success or failure — has this shape. Write one parser.
 
@@ -116,11 +235,11 @@ Non-versioned endpoints (outside `/api/v1`): `GET /`, `GET /health`,
 // Success (single resource)
 {
   "success": true,
-  "code": "OK",                        // "OK" | "CREATED" | "ACCEPTED" | "NO_CONTENT"
-  "message": "Profile fetched successfully.",   // safe to show in a toast
+  "code": "OK",                                  // "OK" | "CREATED" | "ACCEPTED"
+  "message": "Profile fetched successfully.",    // safe to show in a toast
   "data": { /* the resource */ },
-  "request_id": "7a736ea77cb2ca17c82a33d3",
-  "timestamp": "2026-09-10T17:22:39.517Z"
+  "request_id": "e29efab0ec113427e7476d26",
+  "timestamp": "2026-09-10T21:43:49.4768052Z"
 }
 
 // Success (list) — `data` is ALWAYS an array, never null
@@ -130,10 +249,10 @@ Non-versioned endpoints (outside `/api/v1`): `GET /`, `GET /health`,
   "message": "Credit history fetched successfully.",
   "data": [ /* items */ ],
   "meta": {
-    "page": 1, "limit": 20, "total_items": 134, "total_pages": 7,
-    "count": 20, "has_next": true, "has_prev": false,
-    "next_page": 2,
-    "sort": "-spent_at", "search": "coffee",
+    "page": 1, "limit": 2, "total_items": 1, "total_pages": 1,
+    "count": 1, "has_next": false, "has_prev": false,
+    "next_page": 2, "prev_page": null,
+    "sort": "-created_at", "search": "coffee",
     "filters": { "amount[gte]": "500" },   // echo of what was applied
     "extra": { "total_spent": 12450.00 }   // aggregates, when the endpoint has them
   },
@@ -143,81 +262,82 @@ Non-versioned endpoints (outside `/api/v1`): `GET /`, `GET /health`,
 // Failure
 {
   "success": false,
-  "code": "VALIDATION_ERROR",           // branch on THIS, never on message
+  "code": "VALIDATION_ERROR",            // branch on THIS, never on message
   "message": "Some fields are missing or invalid.",
   "errors": [
     {
-      "field": "phone",
-      "rule": "bdphone",
-      "message": "Enter a valid Bangladeshi mobile number, e.g. 01712345678.",
-      "message_bn": "সঠিক মোবাইল নম্বর দিন, যেমন ০১৭১২৩৪৫৬৭৮।",
-      "value": "12345"                   // never present for password/otp/token fields
+      "field": "monthly_income",
+      "rule": "min",
+      "message": "Monthly income cannot be negative.",
+      "message_bn": "মাসিক আয় ঋণাত্মক হতে পারে না।",
+      "value": -500                       // never present for password/otp/token fields
     }
   ],
-  "hint": "Fix the listed fields and submit again.",   // optional, show as helper text
-  "details": { "retry_after_seconds": 3202 },          // optional, structured
+  "hint": "Send at least one field, such as name or monthly_income.",
+  "details": { "retry_after_seconds": 970, "limit": 5, "window_seconds": 3600 },
   "request_id": "...", "timestamp": "..."
 }
 ```
 
 Rules that hold everywhere:
 
-- `data` for a list is an empty array `[]` when there are no results — never `null`.
-- `meta` is present only on paginated list endpoints.
-- `errors[]` is present only for `VALIDATION_ERROR`, `MISSING_FIELD`,
-  `INVALID_FIELD` and `DUPLICATE_ENTRY`.
+- `data` for a list is `[]` when empty — never `null`.
+- `meta` appears only on paginated list endpoints.
+- `errors[]` appears only for `VALIDATION_ERROR`, `MISSING_FIELD`, `INVALID_FIELD`
+  and `DUPLICATE_ENTRY`.
 - `request_id` is on every response. **Show it in your error UI** — it is the one
   string that finds the request in the server logs.
 
-### 3.3 Error codes → what the UI must do
+### 4.3 Error codes → what the UI must do
 
 Branch on `code`. This is the complete catalogue.
 
 | `code` | HTTP | What the UI should do |
 |---|---|---|
-| `VALIDATION_ERROR` | 422 | Map `errors[]` onto form fields (§3.5). Do not toast. |
-| `MISSING_FIELD` | 422 | Same as above. |
-| `INVALID_FIELD` | 422 | Same as above. |
-| `BAD_REQUEST` | 400 | Toast `message`. Usually a client bug — log it. |
-| `UNAUTHORIZED` | 401 | Redirect to `/login`. Clear session. |
-| `TOKEN_EXPIRED` | 401 | **Refresh once, retry** (§4.3). Only redirect if refresh fails. |
-| `TOKEN_INVALID` | 401 | Clear session, redirect to `/login`. Do not retry. |
+| `VALIDATION_ERROR` | 422 | Map `errors[]` onto form fields (§4.4). Do not toast. |
+| `MISSING_FIELD` | 422 | Same. |
+| `INVALID_FIELD` | 422 | Same. |
+| `BAD_REQUEST` | 400 | Toast `message` + `hint`. Usually a client bug — log it. |
+| `UNAUTHORIZED` | 401 | Redirect to `/login`, clear session. |
+| `TOKEN_EXPIRED` | 401 | **Refresh once, retry** (§5.3). Redirect only if refresh fails. |
+| `TOKEN_INVALID` | 401 | Clear session, redirect to `/login`. Do **not** retry. |
 | `FORBIDDEN` | 403 | Toast. Do not redirect. |
 | `PHONE_NOT_VERIFIED` | 403 | Route to `/verify-otp`. |
-| `ACCOUNT_LOCKED` | 423 | Show `details.minutes_remaining` and a "Reset password" CTA. |
+| `ACCOUNT_LOCKED` | 423 | Show the lock window and a "Reset password" CTA. |
 | `ACCOUNT_SUSPENDED` | 403 | Full-screen state with a support link. |
 | `NOT_FOUND` | 404 | Empty state on the screen, not a toast. |
-| `ROUTE_NOT_FOUND` | 404 | Client bug — the endpoint does not exist. Log loudly. |
+| `ROUTE_NOT_FOUND` | 404 | Client bug — that endpoint does not exist. Log loudly. |
 | `METHOD_NOT_ALLOWED` | 405 | Client bug. |
-| `CONFLICT` | 409 | Toast `message` + `hint`. Refetch the affected query. |
+| `CONFLICT` | 409 | Toast `message` + `hint`, refetch the affected query. |
 | `DUPLICATE_ENTRY` | 409 | Map `errors[0].field` onto the form field. |
-| `IDEMPOTENCY_CONFLICT` | 409 | Generate a fresh idempotency key and let the user retry. |
-| `PAYLOAD_TOO_LARGE` | 413 | Toast with the size limit from `details`. |
+| `GONE` | 410 | Refetch; the resource is gone. |
+| `IDEMPOTENCY_CONFLICT` | 409 | Generate a fresh key and let the user retry. |
+| `PAYLOAD_TOO_LARGE` | 413 | Toast with the limit from `details`. |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Client bug. |
 | `RATE_LIMIT_EXCEEDED` | 429 | Disable the action for `details.retry_after_seconds`, show a countdown. |
 | `OTP_INVALID` | 400 | Inline error under the OTP input + `details.attempts_left`. |
-| `OTP_LIMIT_REACHED` | 429 | Disable resend, show a countdown from `details.retry_after_seconds`. |
-| `PAYMENT_REQUIRED` | 402 | Open the paywall sheet (§11.7). |
-| `INSUFFICIENT_CREDITS` | 402 | Paywall, **Buy credits** tab preselected. `details.shortfall` tells you how many are missing. |
-| `QUOTA_EXCEEDED` | 402 | Paywall — free credits are used up. |
-| `SUBSCRIPTION_REQUIRED` | 402 | Paywall, **Plans** tab preselected, highlight `details.required_tier`. |
+| `OTP_LIMIT_REACHED` | 429 | Disable resend, count down from `details.retry_after_seconds`. |
+| `PAYMENT_REQUIRED` | 402 | Open the paywall sheet (§13.1). |
+| `INSUFFICIENT_CREDITS` | 402 | Paywall, **Buy credits** tab preselected. |
+| `QUOTA_EXCEEDED` | 402 | Paywall — free credits used up. |
+| `SUBSCRIPTION_REQUIRED` | 402 | Paywall, **Plans** tab, highlight the required tier. |
 | `PAYMENT_FAILED` | 402 | Toast + retry CTA. |
-| `INTERNAL_ERROR` | 500 | Generic error screen with `request_id`. |
-| `DATABASE_ERROR` | 500 | Same. |
+| `INTERNAL_ERROR` / `DATABASE_ERROR` / `CACHE_ERROR` | 500 | Generic error screen showing `request_id`. |
 | `UPSTREAM_ERROR` | 502 | "Service temporarily unavailable", retry button. |
-| `SERVICE_UNAVAILABLE` | 503 | Same, with backoff. |
+| `SERVICE_UNAVAILABLE` | 503 | Same, with backoff. Usually Redis is down. |
 | `TIMEOUT` | 504 | "That took too long", retry button. |
 
-The four `402` codes are the whole monetisation surface. Handle them in **one**
-shared interceptor that opens the paywall — never per-screen.
+The five `402` codes are the whole monetisation surface. Handle them in **one**
+shared interceptor that opens the paywall — never per screen. Every 402 raised by
+the feature gate carries `details.needs_upgrade` and `details.needs_credits`, so
+the interceptor picks the right tab from the payload rather than from the code.
 
-### 3.4 Validation errors → form fields
+### 4.4 Validation errors → form fields
 
-`errors[].field` is the **JSON field name**, and nested/indexed paths use
+`errors[].field` is the **JSON field name**; nested/indexed paths use
 `items[0].amount` notation. This maps directly onto react-hook-form:
 
 ```ts
-// See §9 for the full helper.
 for (const e of err.errors ?? []) {
   form.setError(e.field as never, {
     type: e.rule ?? "server",
@@ -228,41 +348,36 @@ for (const e of err.errors ?? []) {
 
 `rule` values you will see: `required`, `min`, `max`, `len`, `email`, `bdphone`,
 `username`, `strongpass`, `oneof`, `uuid`, `unique`, `type`, `numeric`, `date`,
-`enum`, `not_filterable`, `unknown_filter`, `operator`, `incorrect`, `same`, `weak`.
+`enum`, `operator`, `incorrect`, `same`, `weak`, `notblank`, `safetext`.
 
-### 3.5 Money format — read this carefully
+### 4.5 Money format — read this carefully
 
 Amounts are stored server-side as **integer paisa** and serialised as a **JSON
 number with exactly two decimals**:
 
 ```jsonc
-{ "amount": 1500.50, "monthly_income": 30000.00, "price": 199.00 }
+{ "amount": 199.00, "monthly_income": 30000.00, "price_per_credit": 3.32 }
 ```
 
-**Reading:** `JSON.parse` gives you a JS number (`1500.5`). Safe for display and
+**Reading:** `JSON.parse` gives a JS number (`199`). Fine for display and
 comparison at Hisabji's scale. **Never** sum many amounts in floating point and
-show the result as authoritative — read a server-provided total instead
-(`meta.extra`, or a `/summary` endpoint).
+present the result as authoritative — read a server total instead (`meta.extra`,
+or a `/summary` endpoint).
 
-**Writing:** send the raw string from the input field. The API parses decimal text
+**Writing:** send the raw string from the input. The API parses decimal text
 exactly and rounds half-up at the second decimal:
 
 ```ts
-// ✅ exact — no float ever involved
-await api.post("/expenses", { amount: "1500.50" });
-
-// ✅ also accepted
-await api.post("/expenses", { amount: 1500.5 });
-
-// ❌ never do arithmetic in the client and send the result
-await api.post("/expenses", { amount: 0.1 + 0.2 });  // 0.30000000000000004
+await api.post("/expenses", { amount: "1500.50" });   // ✅ exact
+await api.post("/expenses", { amount: 1500.5 });      // ✅ also accepted
+await api.post("/expenses", { amount: 0.1 + 0.2 });   // ❌ 0.30000000000000004
 ```
 
-Accepted input forms: `1500`, `1500.5`, `1500.50`, `"1500.50"`, `.5`, `-250.25`.
+Accepted: `1500`, `1500.5`, `"1500.50"`, `.5`, `-250.25`.
 Rejected: `"1,500"`, `"1.2.3"`, `"1e5"`, `"--5"`, `"abc"`.
 
-**Display:** always `৳` prefix, two decimals, thousands separators, **tabular
-numerals** (§10.3):
+**Display:** `৳` prefix, two decimals, thousands separators, **tabular numerals**
+(§12.3):
 
 ```ts
 export const formatBDT = (n: number, opts?: { compact?: boolean }) =>
@@ -272,15 +387,14 @@ export const formatBDT = (n: number, opts?: { compact?: boolean }) =>
     maximumFractionDigits: opts?.compact ? 0 : 2,
     notation: opts?.compact ? "compact" : "standard",
   }).format(n);
-// formatBDT(1500.5)               -> "৳1,500.50"
-// formatBDT(1500.5, {compact:1})  -> "৳2K"   (use only in tight chart labels)
+// formatBDT(1500.5)              -> "৳1,500.50"
+// formatBDT(1500.5, {compact:1}) -> "৳2K"   (chart labels only)
 ```
 
-### 3.6 Dates
+### 4.6 Dates
 
-Transaction dates (`spent_at`, `received_at`, `period_start`, `target_date`, …)
-are **calendar dates** in the user's timezone, serialised as
-`"2026-01-31T00:00:00Z"`. Treat them as dates, never as instants:
+Transaction dates (`spent_at`, `received_at`, `period_start`, `target_date`) are
+**calendar dates** in the user's timezone. Treat them as dates, never instants:
 
 ```ts
 import { parseISO, format } from "date-fns";
@@ -288,28 +402,24 @@ format(parseISO(expense.spent_at), "d MMM yyyy");   // ✅
 new Date(expense.spent_at).toLocaleDateString();     // ❌ shifts by timezone
 ```
 
-Audit timestamps (`created_at`, `updated_at`, `last_used_at`, …) are real
-instants with an offset (`"2026-09-10T23:22:39.176725+06:00"`) — format those in
-local time normally.
+Audit timestamps (`created_at`, `updated_at`, `last_used_at`) are real instants
+with an offset (`"2026-09-11T03:43:48.727918+06:00"`) — format those normally.
+Envelope `timestamp` is UTC (`Z`).
 
-### 3.7 Query conventions (list endpoints)
-
-Every list endpoint accepts the same parameters. The backend validates them
-against a per-resource whitelist and returns `VALIDATION_ERROR` naming the exact
-offending parameter, so a typo is a clear 422, never a silent empty list.
+### 4.7 Query conventions (list endpoints)
 
 | Parameter | Example | Notes |
 |---|---|---|
-| `page` | `?page=2` | 1-based. Default 1. |
-| `limit` | `?limit=20` | Default 20, max 100 (per resource). |
-| `search` | `?search=coffee` | Case-insensitive contains, across that resource's searchable fields. |
-| `sort` | `?sort=-spent_at,amount` | `-` prefix = descending. Max 4 keys. |
-| `date_from` / `date_to` | `?date_from=2026-01-01&date_to=2026-01-31` | Inclusive; `date_to` covers the whole day. |
-| `with_total` | `?with_total=false` | Skips the COUNT query — use for infinite scroll. |
-| `include` | `?include=category` | Relation expansion, where supported. |
-| `fields` | `?fields=id,amount,spent_at` | Sparse fieldsets, where supported. |
+| `page` | `?page=2` | 1-based, default 1 |
+| `limit` | `?limit=20` | default 20, max 100 |
+| `search` | `?search=coffee` | case-insensitive contains |
+| `sort` | `?sort=-spent_at,amount` | `-` = descending, max 4 keys |
+| `date_from` / `date_to` | `?date_from=2026-01-01` | inclusive; `date_to` covers the whole day |
+| `with_total` | `?with_total=false` | skips the COUNT — use for infinite scroll |
+| `include` | `?include=category` | relation expansion where supported |
+| `fields` | `?fields=id,amount` | sparse fieldsets where supported |
 
-**Filters** use `field` or `field[operator]`:
+Filters use `field` or `field[operator]`:
 
 ```
 ?category_id=<uuid>                 eq
@@ -317,16 +427,19 @@ offending parameter, so a typo is a clear 422, never a silent empty list.
 ?amount[between]=100,500            inclusive range
 ?payment_method[in]=cash,bkash      IN
 ?note[contains]=lunch               ILIKE %…%
-?merchant[starts]=Sha               ILIKE …%
 ?note[null]=true                    IS NULL
 ?tags[has]=work                     array contains
 ```
 
 Operators: `eq` `ne` `gt` `gte` `lt` `lte` `in` `nin` `like` `contains` `starts`
-`ends` `between` `null` `has`. Which ones a field accepts depends on its type;
-asking for an unsupported one returns a 422 that **lists the supported operators**.
+`ends` `between` `null` `has`. An unsupported operator returns a 422 that **lists
+the supported ones**.
 
-Build these with a helper, never by string concatenation:
+> **Today:** only `GET /billing/ledger` and `GET /billing/payments` are paginated,
+> and they accept **`page` and `limit` only**. The full engine above applies to the
+> §7 endpoints when they ship.
+
+Build query strings with a helper, never by concatenation:
 
 ```ts
 export function toQuery(params: Record<string, unknown>): string {
@@ -340,109 +453,118 @@ export function toQuery(params: Record<string, unknown>): string {
 }
 ```
 
-### 3.8 Rate limits and idempotency
+### 4.8 Rate limits and idempotency
 
-Rate-limited responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining`,
-`X-RateLimit-Reset` and, on 429, a `Retry-After` header.
+Responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+and, on 429, a `Retry-After` header.
 
-Current limits (per IP unless stated):
+**Verified limits** (per IP unless the scope says per user):
 
-| Endpoint | Limit |
-|---|---|
-| everything under `/api/v1` | 300 / min |
-| `POST /auth/register` | 5 / hour |
-| `POST /auth/login` | 10 / min |
-| `POST /auth/verify-otp` | 15 / min |
-| `POST /auth/resend-otp` | 5 / 10 min |
-| `POST /auth/forgot-password` | 5 / hour |
-| `POST /auth/refresh` | 60 / hour |
-| `POST /billing/subscribe` | 10 / hour (per user) |
-| `POST /billing/credits/buy` | 20 / hour (per user) |
-| `PUT /users/me/username` | 5 / hour (per user) |
-| `DELETE /users/me` | 3 / day (per user) |
+| Endpoint | Limit | Scope |
+|---|---|---|
+| everything under `/api/v1` | 300 / min | IP |
+| `POST /auth/register` | 5 / hour | IP |
+| `POST /auth/login` | 10 / min | IP |
+| `POST /auth/verify-otp` | 15 / min | IP |
+| `POST /auth/resend-otp` | 5 / 10 min | IP |
+| `POST /auth/refresh` | 60 / hour | IP |
+| `POST /auth/forgot-password` | 5 / hour | IP |
+| `POST /auth/reset-password` | 10 / hour | IP |
+| `POST /auth/change-password` | 5 / hour | user |
+| `GET /users/username-available` | 60 / min | IP |
+| `PATCH /users/me`, `/me/preferences`, `POST /me/onboarding` | 60 / min | user |
+| `PUT /users/me/username` | 5 / hour | user |
+| `DELETE /users/me` | 3 / day | user |
+| `POST /billing/subscribe` | 10 / hour | user |
+| `POST /billing/credits/buy` | 20 / hour | user |
+| `POST /billing/subscription/cancel` | 5 / hour | user |
+| `POST /billing/payments/confirm` | 30 / hour | user |
+
+> The register limit of **5/hour per IP** bites during development. When it does:
+> `bash scripts/reset-rate-limit.sh register` clears that one bucket and you can
+> retry immediately; `--list` shows what is currently limited. To stop hitting
+> limits at all, run the server with `RATE_LIMIT_ENABLED=false`.
 
 **Idempotency.** Send `X-Idempotency-Key: <uuid>` on `POST /billing/subscribe` and
-`POST /billing/credits/buy`. Generate it once when the user opens the checkout
-sheet, reuse it for every retry of that same purchase, and discard it on success.
-Replaying a key returns the original payment with `already_processed: true` — that
-is what stops a flaky network from charging twice.
+`POST /billing/credits/buy`. Generate it once when the checkout sheet opens, reuse
+it for every retry of that purchase, discard it on success. Replaying a key returns
+the original payment with `already_processed: true` — that is what stops a flaky
+network from charging twice.
 
-### 3.9 Icons and colors come from the API
+### 4.9 Icons and colours come from the API
 
 `categories.icon` and `features.icon` are **lucide-react icon names**
-(`utensils`, `bus`, `home`, `credit-card`, `piggy-bank`, `sparkles`, …). Render
-them dynamically:
+(`utensils`, `bus`, `home`, `credit-card`, `piggy-bank`, `sparkles`, `timer`,
+`message-circle`, `alert-triangle`). Render dynamically:
 
 ```tsx
 import * as Lucide from "lucide-react";
 
 export function DynamicIcon({ name, ...props }: { name: string } & Lucide.LucideProps) {
   const key = name.split("-").map(p => p[0].toUpperCase() + p.slice(1)).join("");
-  const Icon = (Lucide as Record<string, unknown>)[key] as Lucide.LucideIcon | undefined;
-  return <(Icon ?? Lucide.Circle) {...props} />;
+  const Icon = ((Lucide as Record<string, unknown>)[key] as Lucide.LucideIcon) ?? Lucide.Circle;
+  return <Icon {...props} />;
 }
 ```
 
 `categories.color` is a `#RRGGBB` hex. **Use it for that category everywhere** —
-chips, chart series, list rows. Do not assign your own category colors; the data
+chips, chart series, list rows. Never assign your own category colours; the data
 already carries them, so the pie chart and the list always agree.
 
 ---
 
-## 4. Auth architecture — BFF with httpOnly cookies
+## 5. Auth architecture — BFF with httpOnly cookies
 
-### 4.1 The decision
+### 5.1 The decision
 
-The API returns tokens as JSON. If the browser stored them, they would live in
-`localStorage` and any XSS would hand an attacker a 30-day refresh token.
+The API returns tokens as JSON. If the browser stored them they would live in
+`localStorage`, and any XSS would hand an attacker a 30-day refresh token.
 
 So: **the browser never sees a token.** Next.js Route Handlers act as a
-Backend-For-Frontend. They hold the tokens in `httpOnly`, `secure`, `sameSite=lax`
-cookies and proxy every API call.
+Backend-For-Frontend, holding tokens in `httpOnly` cookies and proxying every call.
 
 ```
 Browser ──(cookie)──▶ Next Route Handler ──(Bearer)──▶ Go API
 ```
 
-Consequences you must respect:
-
-- Client components call **`/api/hisabji/...`**, never `HISABJI_API_URL` directly.
-- Server Components call the Go API directly using `lib/api/server.ts`.
+- Client components call **`/api/hisabji/...`**, never `HISABJI_API_URL`.
+- Server Components call the Go API directly via `lib/api/server.ts`.
 - CORS is irrelevant in production (same origin). Keep `http://localhost:3000` in
-  `CORS_ALLOWED_ORIGINS` only for debugging.
+  the server's `CORS_ALLOWED_ORIGINS` only for debugging.
 
-### 4.2 Cookies
+### 5.2 Cookies
 
 | Cookie | Contents | Flags | Max-Age |
 |---|---|---|---|
 | `hisabji_at` | access token | httpOnly, secure, sameSite=lax, path=/ | 1800 |
 | `hisabji_rt` | refresh token | httpOnly, secure, sameSite=lax, path=/api | 2592000 |
+| `NEXT_LOCALE` | `bn` \| `en` | **not** httpOnly (the client switcher reads it) | 31536000 |
 
-### 4.3 Token lifecycle
+### 5.3 Token lifecycle
 
-- Access token: **30 minutes**, a signed JWT carrying `sub`, `role`, `plan`, `sid`.
-- Refresh token: **30 days**, an opaque 256-bit random string checked against the
-  server's `sessions` table on every use.
+- Access token: **30 min**, a signed JWT carrying `sub`, `role`, `plan`, `sid`.
+- Refresh token: **30 days**, an opaque random string checked against the server's
+  `sessions` table on every use.
 - **Rotation with reuse detection:** every refresh issues a new refresh token and
   revokes the old one. Presenting an already-used token means it was stolen, so the
-  server revokes **the entire device family** and returns
-  `TOKEN_INVALID` with *"all sessions have been signed out"*.
+  server revokes **the whole device family** and returns `TOKEN_INVALID` with
+  *"all sessions have been signed out"*.
 
-  → Your client must therefore **never refresh concurrently.** The proxy in §8
-  serialises refreshes with a single-flight promise. Firing two refreshes in
-  parallel will log the user out of every device.
+  → Your client must therefore **never refresh concurrently.** The proxy in §9.3
+  serialises refreshes with a single-flight promise. Two parallel refreshes will
+  sign the user out of every device.
 
-### 4.4 The full auth flow
+### 5.4 The full auth flow
 
 ```
-POST /auth/register        → 201, requires_verification: true, next_step: "verify_phone"
-                             (no tokens — an unverified phone is an unproven identity)
-POST /auth/verify-otp      → 200, tokens issued, user signed in
-POST /auth/login           → 200 + tokens
-                             ...unless phone is unverified: 200 with
-                             requires_verification: true and a fresh OTP already sent
-POST /auth/refresh         → 200 + a NEW pair (old refresh token is now dead)
-POST /auth/logout          → 200  ({ "all_devices": true } to end every session)
+POST /auth/register     → 201, requires_verification: true, next_step: "verify_phone"
+                          (no tokens — an unverified phone is an unproven identity)
+POST /auth/verify-otp   → 200, tokens issued, user signed in
+POST /auth/login        → 200 + tokens
+                          ...unless the phone is unverified: 200 with
+                          requires_verification: true and a fresh OTP already sent
+POST /auth/refresh      → 200 + a NEW pair (the old refresh token is now dead)
+POST /auth/logout       → 200  ({ "all_devices": true } ends every session)
 ```
 
 `next_step` tells you where to navigate — do not infer it:
@@ -456,94 +578,1253 @@ POST /auth/logout          → 200  ({ "all_devices": true } to end every sessio
 | `onboarding:budget` | `/onboarding/budget` |
 | `dashboard` | `/` |
 
-**Development helper:** outside production the register/verify responses include
+**Development helper:** outside production, register/verify/resend responses include
 `dev_otp` so you can complete signup without an SMS gateway. It is never present
 when `APP_ENV=production`. Show it in a dev-only banner.
 
 ---
 
-## 5. Endpoint reference — implemented
+## 6. Endpoint reference — implemented
 
-`✔` = live and covered by the backend smoke suite. `🔒` = requires `Authorization`.
+🔒 = requires `Authorization`. Every JSON block below is a **real captured
+response** from a running server.
 
-### 5.1 Meta
+### 6.0 Index
 
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/` | ✔ service info |
-| `GET` | `/health` | ✔ full check (db + redis) |
-| `GET` | `/health/live` | ✔ liveness only — never rate limited |
-| `GET` | `/health/ready` | ✔ readiness |
-
-### 5.2 Auth — `/api/v1/auth`
-
-| Method | Path | Body | Returns |
+| # | Method | Path | Auth |
 |---|---|---|---|
-| `POST` | `/register` | `{name, phone, password, email?, username?, user_type?, locale?, device_name?}` | `AuthResponse` (201) |
-| `POST` | `/verify-otp` | `{phone, otp}` | `AuthResponse` with tokens |
-| `POST` | `/resend-otp` | `{phone, purpose?}` | `OTPResponse` |
-| `POST` | `/login` | `{identifier, password, device_name?}` | `AuthResponse` |
-| `POST` | `/refresh` | `{refresh_token}` | `AuthResponse` with a new pair |
-| `POST` | `/forgot-password` | `{phone}` | `OTPResponse` — always 200, even for an unknown number |
-| `POST` | `/reset-password` | `{phone, otp, new_password}` | `{sessions_ended}` |
-| `POST` | `/logout` 🔒 | `{refresh_token?, all_devices?}` | `{sessions_ended, all_devices}` |
-| `GET` | `/sessions` 🔒 | — | `SessionResponse[]` |
-| `DELETE` | `/sessions/:id` 🔒 | — | `{id}` |
-| `POST` | `/change-password` 🔒 | `{current_password, new_password}` | `{other_sessions_ended}` |
+| 6.1.1 | `GET` | `/` | — |
+| 6.1.2 | `GET` | `/health` | — |
+| 6.1.3 | `GET` | `/health/live` | — |
+| 6.1.4 | `GET` | `/health/ready` | — |
+| 6.2.1 | `POST` | `/api/v1/auth/register` | — |
+| 6.2.2 | `POST` | `/api/v1/auth/verify-otp` | — |
+| 6.2.3 | `POST` | `/api/v1/auth/resend-otp` | — |
+| 6.2.4 | `POST` | `/api/v1/auth/login` | — |
+| 6.2.5 | `POST` | `/api/v1/auth/refresh` | — |
+| 6.2.6 | `POST` | `/api/v1/auth/forgot-password` | — |
+| 6.2.7 | `POST` | `/api/v1/auth/reset-password` | — |
+| 6.2.8 | `POST` | `/api/v1/auth/logout` | 🔒 |
+| 6.2.9 | `GET` | `/api/v1/auth/sessions` | 🔒 |
+| 6.2.10 | `DELETE` | `/api/v1/auth/sessions/:id` | 🔒 |
+| 6.2.11 | `POST` | `/api/v1/auth/change-password` | 🔒 |
+| 6.3.1 | `GET` | `/api/v1/users/username-available` | optional |
+| 6.3.2 | `GET` | `/api/v1/users/me` | 🔒 |
+| 6.3.3 | `PATCH` | `/api/v1/users/me` | 🔒 |
+| 6.3.4 | `PATCH` | `/api/v1/users/me/preferences` | 🔒 |
+| 6.3.5 | `PUT` | `/api/v1/users/me/username` | 🔒 |
+| 6.3.6 | `POST` | `/api/v1/users/me/onboarding` | 🔒 |
+| 6.3.7 | `DELETE` | `/api/v1/users/me` | 🔒 |
+| 6.4.1 | `GET` | `/api/v1/billing/plans` | optional |
+| 6.4.2 | `GET` | `/api/v1/billing/credit-packs` | optional |
+| 6.4.3 | `GET` | `/api/v1/billing/features` | optional |
+| 6.4.4 | `GET` | `/api/v1/billing/me` | 🔒 |
+| 6.4.5 | `GET` | `/api/v1/billing/wallet` | 🔒 |
+| 6.4.6 | `GET` | `/api/v1/billing/ledger` | 🔒 |
+| 6.4.7 | `GET` | `/api/v1/billing/payments` | 🔒 |
+| 6.4.8 | `GET` | `/api/v1/billing/features/:code/access` | 🔒 |
+| 6.4.9 | `POST` | `/api/v1/billing/credits/buy` | 🔒 |
+| 6.4.10 | `POST` | `/api/v1/billing/subscribe` | 🔒 |
+| 6.4.11 | `POST` | `/api/v1/billing/subscription/cancel` | 🔒 |
+| 6.4.12 | `POST` | `/api/v1/billing/payments/confirm` | 🔒 sandbox only |
+
+---
+
+### 6.1 Meta — outside `/api/v1`, never rate limited
+
+#### 6.1.1 `GET /`
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Hisabji API is running.",
+  "data": {
+    "api_base": "/api/v1", "docs": "/docs", "environment": "development",
+    "health": "/health", "service": "Hisabji API", "version": "1.0.0"
+  },
+  "request_id": "0c0e57affbd87e9a61fcbcef",
+  "timestamp": "2026-09-10T21:43:26.3687355Z"
+}
+```
+
+> `service` echoes the server's `APP_NAME` env var, so it differs between
+> environments — never key any client logic off it.
+> `data.docs` currently points at `/docs`, which **is not a mounted route** and
+> returns `404 ROUTE_NOT_FOUND`. The documentation lives in the repository at
+> [`docs/api/`](api/README.md). Do not link the UI to `/docs`.
+
+#### 6.1.2 `GET /health`
+
+Returns **200** when healthy, **503** when not. Note: this endpoint returns a
+**plain object, not the envelope** — it is for probes, not for the app.
+
+```jsonc
+{
+  "status": "ok",                    // "ok" | "unhealthy"
+  "service": "Hisabji API", "version": "1.0.0", "environment": "development",
+  "checks": { "database": { "pool": { /* ... */ } }, "redis": { /* ... */ } },
+  "timestamp": "2026-09-10T21:43:26Z"
+}
+```
+
+#### 6.1.3 `GET /health/live` → `{"status":"alive"}`
+#### 6.1.4 `GET /health/ready` → `{"status":"ready"|"not_ready","checks":{…},"version":"…"}`
+
+**UI:** use these only on a `/debug` page and for uptime monitoring.
+
+---
+
+### 6.2 Auth — `/api/v1/auth`
+
+#### 6.2.1 `POST /auth/register`
+
+Creates the account and sends an OTP. **No tokens are returned** — an unverified
+phone is an unproven identity.
+
+Rate limit: **5 / hour per IP**.
+
+**Request**
+
+```json
+{
+  "name": "Doc User",
+  "phone": "01743485253",
+  "password": "hisabji2026",
+  "user_type": "job_holder"
+}
+```
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `name` | string | ✅ | 2–100, not blank, no unsafe characters |
+| `phone` | string | ✅ | Bangladeshi mobile. `+8801…`, `8801…`, `01…` all normalise to `01…` |
+| `password` | string | ✅ | strong: ≥8, letters + digits; must not equal the name or contain the phone |
+| `email` | string | — | valid email, ≤255 |
+| `username` | string | — | `^[a-z0-9][a-z0-9_.]{1,28}[a-z0-9]$` |
+| `user_type` | enum | — | `personal` \| `student` \| `job_holder` \| `business` \| `freelancer` \| `family` |
+| `locale` | enum | — | `bn` \| `en` |
+| `device_name` | string | — | ≤120; defaults to the User-Agent |
+
+**Response `201 CREATED`**
+
+```jsonc
+{
+  "success": true, "code": "CREATED",
+  "message": "Account created. Enter the verification code we sent to your phone.",
+  "data": {
+    "user": {
+      "id": "218dd73c-5b11-49ed-a614-bdbf127bae2f",
+      "name": "Doc User", "username": null, "email": null,
+      "phone": "01743485253", "avatar_path": null,
+      "user_type": "job_holder", "role": "user", "status": "active",
+      "locale": "en", "currency": "BDT", "timezone": "Asia/Dhaka",
+      "monthly_income": 0.00, "month_start_day": 1,
+      "phone_verified": false, "email_verified": false,
+      "onboarding_step": "profile", "plan_code": "free",
+      "created_at": "2026-09-11T03:43:48.727918+06:00",
+      "updated_at": "2026-09-11T03:43:48.727918+06:00"
+    },
+    "requires_verification": true,
+    "dev_otp": "601367",             // development only — never in production
+    "next_step": "verify_phone"
+  },
+  "request_id": "747021f2da6351a950aed55c",
+  "timestamp": "2026-09-10T21:43:48.751529Z"
+}
+```
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `VALIDATION_ERROR` | 422 | bad phone/password/name — `errors[]` names the field |
+| `DUPLICATE_ENTRY` | 409 | that phone (or email/username) is already registered |
+| `RATE_LIMIT_EXCEEDED` | 429 | more than 5 registrations from one IP in an hour |
+
+**UI:** store `phone` in a client store, navigate to `/verify-otp`. Never store the
+password. Show `dev_otp` in a dev-only banner.
+
+---
+
+#### 6.2.2 `POST /auth/verify-otp`
+
+Verifies the phone **and signs the user in** — this is where the first token pair
+comes from.
+
+Rate limit: **15 / min per IP**.
+
+**Request**
+
+```json
+{ "phone": "01743485253", "otp": "601367" }
+```
+
+`otp` must be exactly 6 digits.
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "Phone number verified. You are now signed in.",
+  "data": {
+    "user": { "...": "as above, but phone_verified: true, phone_verified_at set" },
+    "tokens": {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "refresh_token": "C8npp4q7wKmoH_YMB9Mqs8IJa21X4RSodnJhuGXQYlM",
+      "token_type": "Bearer",
+      "expires_in": 1800,
+      "expires_at": "2026-09-11T04:13:48.9836606+06:00",
+      "refresh_expires_at": "2026-10-11T03:43:48.9836606+06:00"
+    },
+    "requires_verification": false,
+    "next_step": "onboarding:profile"
+  },
+  "request_id": "1af9f1be4b9221c4a30d30fa",
+  "timestamp": "2026-09-10T21:43:48.9836606Z"
+}
+```
+
+**Errors**
+
+| Code | HTTP | When | `details` |
+|---|---|---|---|
+| `OTP_INVALID` | 400 | wrong code, expired code, already-used code, **or no pending OTP at all** — all four share this one code and a deliberately vague message | `attempts_left` |
+| `OTP_LIMIT_REACHED` | 429 | too many wrong guesses on this code. The code is **burned** — the user must request a new one | — |
+| `VALIDATION_ERROR` | 422 | not 6 digits / bad phone | — |
+
+**UI:** an OTP is single-use — after success, never resubmit the same code. Send the
+tokens to your own `/api/auth/verify-otp` route handler so they land in cookies
+(§9.5), then route by `next_step`.
+
+---
+
+#### 6.2.3 `POST /auth/resend-otp`
+
+Rate limit: **5 / 10 min per IP**, plus a server-side resend cooldown of 60s and a
+cap of 5 per 6-hour window per phone.
+
+**Request**
+
+```json
+{ "phone": "01743485253", "purpose": "register" }
+```
+
+`purpose` ∈ `register` (default) | `login` | `reset_password` | `change_phone`.
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "A new verification code has been sent.",
+  "data": {
+    "phone": "017*****253",          // MASKED — not the number you sent
+    "purpose": "register",
+    "expires_at": "2026-09-11T03:53:48+06:00",
+    "resend_after_seconds": 60,
+    "attempts_left": 5,
+    "dev_otp": "601367"
+  },
+  "request_id": "...", "timestamp": "..."
+}
+```
+
+> ⚠️ **`data.phone` comes back masked** as `017*****253`. Render it as "we sent a
+> code to 017\*\*\*\*\*253"; never use it as the value for the next request. Keep
+> the real number in your own client store from the register/login step.
+
+**An unregistered number gets this exact same 200** with no SMS sent — otherwise
+the endpoint becomes a free check of which phone numbers have accounts. So a
+success here does **not** mean the account exists.
+
+**Errors:** `OTP_LIMIT_REACHED` (429) — either inside the 60 s cooldown
+(`details.retry_after_seconds`) or over the 5-per-6-hour cap for that number
+(`details.window_hours`, `details.max_requests`).
+
+**UI:** disable the resend button for `resend_after_seconds` and show a countdown.
+
+---
+
+#### 6.2.4 `POST /auth/login`
+
+Rate limit: **10 / min per IP**.
+
+**Request**
+
+```json
+{ "identifier": "01743485253", "password": "hisabji2026" }
+```
 
 `identifier` accepts **phone, email or username**. Phone numbers are normalised, so
 `+8801712345678`, `8801712345678` and `01712345678` are the same account.
+`device_name` is optional (≤120) and labels the session in the devices list.
 
-### 5.3 Users — `/api/v1/users`
+**Response `200 OK`** — identical shape to verify-otp:
 
-| Method | Path | Body / Query | Returns |
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Signed in successfully.",
+  "data": {
+    "user": { "...": "full user object" },
+    "tokens": { "access_token": "...", "refresh_token": "...", "token_type": "Bearer",
+                "expires_in": 1800, "expires_at": "...", "refresh_expires_at": "..." },
+    "requires_verification": false,
+    "next_step": "onboarding:profile"
+  }
+}
+```
+
+**The important special case — unverified phone.** Still `200`, but:
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "Please verify your phone number to continue.",
+  "data": { "requires_verification": true, "dev_otp": "123456", "next_step": "verify_phone" }
+}
+```
+
+A fresh OTP has **already been sent**. Route straight to `/verify-otp`; do not ask
+the user to tap "resend".
+
+**Errors**
+
+| Code | HTTP | When | `details` |
 |---|---|---|---|
-| `GET` | `/username-available` | `?username=rasel` | `UsernameAvailability` |
-| `GET` | `/me` 🔒 | `?stats=true` | `ProfileResponse` |
-| `PATCH` | `/me` 🔒 | `{name?, email?, user_type?, avatar_path?, monthly_income?, month_start_day?}` | `User` |
-| `PATCH` | `/me/preferences` 🔒 | `{locale?, currency?, timezone?, month_start_day?}` | `User` |
-| `PUT` | `/me/username` 🔒 | `{username}` | `User` |
-| `POST` | `/me/onboarding` 🔒 | `{step, user_type?, monthly_income?, month_start_day?, currency?, locale?}` | `ProfileResponse` |
-| `DELETE` | `/me` 🔒 | `{password, confirm:"DELETE", reason?}` | `{deleted, purge_after, can_reregister, message}` |
+| `UNAUTHORIZED` | 401 | wrong password — **or no such account**, identically worded and identically slow, so login cannot be used to discover which numbers are registered | `attempts_remaining` (wrong password only) |
+| `ACCOUNT_LOCKED` | 423 | 5 failed attempts → locked for 6 hours | `locked_until`, `minutes_remaining` |
+| `ACCOUNT_SUSPENDED` | 403 | disabled by an admin | — |
+| `VALIDATION_ERROR` | 422 | empty identifier/password | — |
 
-`PATCH /me` is a **true partial update** — omitted fields are left untouched.
-Sending `{}` returns `BAD_REQUEST`, so a "save" with no changes is caught.
+A successful password reset clears the lock immediately — that is why the 423's
+`hint` says so, and why the lockout screen must offer "Forgot password".
 
-`onboarding.step` ∈ `profile | income | categories | budget | done`.
+**UI:** show `details.attempts_remaining` after a wrong password — it is the single
+biggest reduction in "why am I locked out?" support messages.
 
-### 5.4 Billing — `/api/v1/billing`
+---
 
-| Method | Path | Auth | Returns |
-|---|---|---|---|
-| `GET` | `/plans` | optional | `Plan[]` — `is_current_plan` set when signed in |
-| `GET` | `/credit-packs` | optional | `CreditPack[]` |
-| `GET` | `/features` | optional | `{features: Feature[], by_category: Record<string, Feature[]>}` |
-| `GET` | `/me` | 🔒 | `{entitlement, wallet, subscription?}` |
-| `GET` | `/wallet` | 🔒 | `Wallet` |
-| `GET` | `/ledger` | 🔒 | `LedgerEntry[]` + `meta` |
-| `GET` | `/payments` | 🔒 | `Payment[]` + `meta` |
-| `GET` | `/features/:code/access` | 🔒 | `Access` |
-| `POST` | `/subscribe` | 🔒 | `CheckoutResult` (201) |
-| `POST` | `/credits/buy` | 🔒 | `CheckoutResult` (201) |
-| `POST` | `/subscription/cancel` | 🔒 | `Subscription` |
-| `POST` | `/payments/confirm` | 🔒 | **sandbox only** — settles a payment |
+#### 6.2.5 `POST /auth/refresh`
 
-> `POST /payments/confirm` is registered **only** when `PAYMENT_SANDBOX=true`. In
-> production a gateway webhook settles payments; the route does not exist, so a
-> client cannot grant itself a plan. Build the success screen to poll
-> `GET /billing/me` rather than to call confirm.
+Rate limit: **60 / hour per IP**. **Single-flight only** (§5.3).
 
-### 5.5 The billing model (what the UI must communicate)
+**Request**
 
-Everything premium is metered in one currency: **credits** (the "tokens"). Two ways
-to get them:
+```json
+{ "refresh_token": "C8npp4q7wKmoH_YMB9Mqs8IJa21X4RSodnJhuGXQYlM" }
+```
 
-1. **Subscribe** — a plan grants `monthly_credits` every billing month and unlocks
-   a set of `feature_codes`.
+**Response `200 OK`** — a full `AuthResponse` with a **new pair**; the old refresh
+token is now dead.
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Session refreshed.",
+  "data": {
+    "user": { "...": "refreshed user" },
+    "tokens": { "access_token": "...", "refresh_token": "FxsjqLBXAk1MdR7oueRFuBuPpXefN8AUfl0kDtucTfA",
+                "token_type": "Bearer", "expires_in": 1800, "...": "..." },
+    "requires_verification": false,
+    "next_step": "onboarding:income"
+  }
+}
+```
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `TOKEN_INVALID` | 401 | unknown or revoked token; **or reused**, in which case the message says *"all sessions have been signed out"* and every device is now logged out; **or** the password was changed after this session started |
+| `TOKEN_EXPIRED` | 401 | the refresh token itself is past its 30 days |
+| `ACCOUNT_SUSPENDED` | 403 | the account is no longer active |
+
+**UI:** on any of these, clear both cookies and go to `/login`. Never retry.
+
+---
+
+#### 6.2.6 `POST /auth/forgot-password`
+
+Rate limit: **5 / hour per IP**.
+
+**Request** `{ "phone": "01743485253" }`
+
+**Response `200 OK`** — always success, even for an unregistered number (this is
+deliberate: a different answer would let anyone enumerate accounts).
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "If that phone number is registered, a reset code has been sent to it.",
+  "data": { "phone": "017*****253", "purpose": "reset_password",
+            "expires_at": "...", "resend_after_seconds": 60, "attempts_left": 5,
+            "dev_otp": "445120" }
+}
+```
+
+> ⚠️ `data.phone` is **masked**, exactly as in §6.2.3. Display only.
+
+The one error that *does* surface here is `OTP_LIMIT_REACHED` (429) — a real limit
+the user has to see. Everything else stays quiet behind the 200.
+
+**UI:** never say "no account found" — mirror the server's wording.
+
+---
+
+#### 6.2.7 `POST /auth/reset-password`
+
+Rate limit: **10 / hour per IP**.
+
+**Request**
+
+```json
+{ "phone": "01743485253", "otp": "445120", "new_password": "hisabji2027" }
+```
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "Password reset. Please sign in with your new password.",
+  "data": { "sessions_ended": 3 }
+}
+```
+
+**Errors:** `OTP_INVALID` (400), `VALIDATION_ERROR` (422, weak password).
+
+**UI:** every session was killed — clear cookies and send the user to `/login`.
+
+---
+
+#### 6.2.8 `POST /auth/logout` 🔒
+
+**Request** (an empty body is valid and ends the current session)
+
+```json
+{ "all_devices": false }
+```
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Signed out successfully.",
+  "data": { "all_devices": false, "sessions_ended": 1 }
+}
+```
+
+**UI:** always clear cookies locally too, even if the call fails.
+
+---
+
+#### 6.2.9 `GET /auth/sessions` 🔒
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "Signed-in devices fetched successfully.",
+  "data": [
+    {
+      "id": "55f11d93-2344-4df8-8a87-eb06d64fe945",
+      "device_name": "curl/8.11.0", "ip": "::1",
+      "is_current": false,
+      "last_used_at": "2026-09-11T03:43:49.373993+06:00",
+      "expires_at": "2026-10-11T03:43:49.373653+06:00",
+      "created_at": "2026-09-11T03:43:49.373993+06:00"
+    },
+    {
+      "id": "796b1f25-c445-400f-bc2d-1b1a49cdd76a",
+      "device_name": null, "ip": "::1", "is_current": true,
+      "last_used_at": "...", "expires_at": "...", "created_at": "..."
+    }
+  ]
+}
+```
+
+Not paginated. **UI:** badge `is_current`, sort by `last_used_at` desc, show
+`device_name ?? t("settings.unknownDevice")`.
+
+---
+
+#### 6.2.10 `DELETE /auth/sessions/:id` 🔒
+
+`:id` must be a UUID. **Response `200 OK`**
+
+```jsonc
+{ "success": true, "code": "OK", "message": "That device has been signed out.",
+  "data": { "id": "55f11d93-2344-4df8-8a87-eb06d64fe945" } }
+```
+
+**Errors:** `NOT_FOUND` (404, someone else's session id), `VALIDATION_ERROR` (422,
+not a UUID).
+
+---
+
+#### 6.2.11 `POST /auth/change-password` 🔒
+
+Rate limit: **5 / hour per user**.
+
+**Request**
+
+```json
+{ "current_password": "hisabji2026", "new_password": "hisabji2027" }
+```
+
+**Response `200 OK`**
+
+```jsonc
+{ "success": true, "code": "OK",
+  "message": "Password changed. Your other devices have been signed out.",
+  "data": { "other_sessions_ended": 2 } }
+```
+
+**Errors:** `UNAUTHORIZED` (401, wrong current password), `VALIDATION_ERROR` (422,
+new equals old — `rule: "same"`).
+
+---
+
+### 6.3 Users — `/api/v1/users`
+
+#### 6.3.1 `GET /users/username-available?username=<name>` (optional auth)
+
+Works signed out (registration) and signed in (changing it — your own current
+username does not count as taken). Rate limit: **60 / min per IP**.
+
+**Response `200 OK` — taken**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "That username is reserved.",
+  "data": {
+    "username": "admin", "available": false,
+    "reason": "That username is reserved.",
+    "suggestions": ["admin1", "admin01", "admin_bd"]
+  }
+}
+```
+
+**Response `200 OK` — free**
+
+```jsonc
+{ "success": true, "code": "OK", "message": "That username is available.",
+  "data": { "username": "rasel_ahmed", "available": true } }
+```
+
+**Errors:** `VALIDATION_ERROR` (422) when `?username=` is missing.
+
+**UI:** debounce 400 ms, show a spinner in the input, then a tick or a cross plus
+the suggestion chips. This is a **200 either way** — do not treat "taken" as an error.
+
+---
+
+#### 6.3.2 `GET /users/me?stats=true` 🔒
+
+The home-screen bootstrap: profile + entitlement + onboarding state in one call.
+`?stats=true` adds lifetime counters (costs several aggregate scans — ask for it
+only on the dashboard, not on every refresh).
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Profile fetched successfully.",
+  "data": {
+    "user": {
+      "id": "218dd73c-5b11-49ed-a614-bdbf127bae2f",
+      "name": "Doc User", "username": null, "email": null,
+      "phone": "01743485253", "avatar_path": null,
+      "user_type": "job_holder", "role": "user", "status": "active",
+      "locale": "en", "currency": "BDT", "timezone": "Asia/Dhaka",
+      "monthly_income": 0.00, "month_start_day": 1,
+      "phone_verified": true, "phone_verified_at": "2026-09-11T03:43:48.970786+06:00",
+      "email_verified": false,
+      "onboarding_step": "profile", "plan_code": "free",
+      "last_login_at": "2026-09-11T03:43:49.384109+06:00",
+      "last_seen_at": "2026-09-11T03:43:49.384109+06:00",
+      "created_at": "...", "updated_at": "..."
+    },
+    "entitlement": {
+      "plan_code": "free", "tier": "free",
+      "features": ["basic_analytics", "safe_to_spend", "custom_categories", "budget_alerts"],
+      "subscription_status": "none", "days_remaining": 0,
+      "allowance_credits": 0, "purchased_credits": 3, "total_credits": 3
+    },
+    "onboarding_complete": false,
+    "onboarding_step": "profile",
+    "stats": {
+      "expense_count": 0, "income_count": 0, "category_count": 0, "goal_count": 0,
+      "total_spent": 0.00, "total_income": 0.00,
+      "first_entry_on": null, "active_days": 0
+    }
+  }
+}
+```
+
+**Never returned:** `password_hash`, `failed_login_count`, `locked_until`,
+`password_changed_at`, `last_login_ip`, `deleted_at`, `metadata`. Do not build UI
+expecting them.
+
+If billing or the stats query fails, this endpoint **still returns 200** with
+`entitlement` / `stats` simply absent — a billing hiccup must not break the home
+screen. Optional-chain both.
+
+**UI:** this is the route guard's data source. `role === "admin"` is what unlocks
+the admin panel (§14).
+
+---
+
+#### 6.3.3 `PATCH /users/me` 🔒
+
+A **true partial update** — omitted fields are untouched. `PUT` is accepted and
+behaves identically. Rate limit: **60 / min per user**.
+
+**Request** (send only what changed)
+
+```json
+{ "name": "Rasel Ahmed", "monthly_income": 30000 }
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `name` | string | 2–100, not blank |
+| `email` | string | valid email, ≤255 |
+| `user_type` | enum | the six values in §6.2.1 |
+| `avatar_path` | string | ≤500 |
+| `monthly_income` | number/string | ≥ 0, ≤ 100,000,000 |
+| `month_start_day` | int | 1–28 |
+
+**Response `200 OK`** — the **plain `User` object** (not `ProfileResponse`):
+
+```jsonc
+{ "success": true, "code": "OK", "message": "Profile updated successfully.",
+  "data": { "id": "...", "name": "Rasel Ahmed", "monthly_income": 30000.00, "...": "..." } }
+```
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `BAD_REQUEST` | 400 | `{}` — "No changes were provided." with a `hint` |
+| `VALIDATION_ERROR` | 422 | negative income, bad email, `month_start_day` 0 or 29 |
+| `DUPLICATE_ENTRY` | 409 | that email belongs to another account |
+
+**UI:** send only dirty fields (`react-hook-form`'s `dirtyFields`) — that is what
+makes the partial update actually partial.
+
+---
+
+#### 6.3.4 `PATCH /users/me/preferences` 🔒
+
+**Request**
+
+```json
+{ "locale": "bn" }
+```
+
+| Field | Rules |
+|---|---|
+| `locale` | `bn` \| `en` |
+| `currency` | 3 letters — but **only `BDT` is accepted**; anything else is rejected, not stored |
+| `timezone` | ≤64, e.g. `Asia/Dhaka` |
+| `month_start_day` | 1–28 |
+
+**Response `200 OK`** — the updated `User`:
+
+```jsonc
+{ "success": true, "code": "OK", "message": "Preferences updated successfully.",
+  "data": { "id": "...", "locale": "bn", "currency": "BDT", "timezone": "Asia/Dhaka", "...": "..." } }
+```
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `BAD_REQUEST` | 400 | empty body — nothing to change |
+| `VALIDATION_ERROR` | 422 | locale outside `bn\|en`, `month_start_day` out of 1–28 |
+| `INVALID_FIELD` | 422 | `currency` other than `BDT` — *"Only BDT is supported at the moment."* |
+
+**UI:** do not offer a currency picker yet. The API states the limit plainly rather
+than accepting the value and then rendering every amount with the wrong symbol.
+The language switcher (§11.6) calls this when the user is signed in, so the choice
+follows them to a new device.
+
+---
+
+#### 6.3.5 `PUT /users/me/username` 🔒
+
+Rate limit: **5 / hour per user** — a username is nearly an identity, so churn is
+capped.
+
+**Request** `{ "username": "doc_user_x1" }`
+
+**Response `200 OK`** — the updated `User`:
+
+```jsonc
+{ "success": true, "code": "OK", "message": "Username updated successfully.",
+  "data": { "id": "...", "username": "doc_user_x1", "...": "..." } }
+```
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `VALIDATION_ERROR` | 422 | bad format (3–30 chars, lowercase, `_` and `.` inside only) |
+| `DUPLICATE_ENTRY` | 409 | taken — `details.suggestions` carries alternatives |
+| `DUPLICATE_ENTRY` | 409 | **reserved word** — same code, message *"That username is reserved and cannot be used."*, no suggestions |
+| `RATE_LIMIT_EXCEEDED` | 429 | 6th change within an hour |
+
+Both 409s carry `errors[0].field = "username"` with `rule: "unique"`, so one
+`setError` branch handles taken and reserved alike.
+
+---
+
+#### 6.3.6 `POST /users/me/onboarding` 🔒
+
+Advances the wizard and saves that step's data in one round trip.
+
+**Request**
+
+```json
+{ "step": "income", "monthly_income": 30000, "month_start_day": 7 }
+```
+
+`step` ∈ `profile` | `income` | `categories` | `budget` | `done` (required).
+Optional alongside it: `user_type`, `monthly_income`, `month_start_day`,
+`currency`, `locale`.
+
+**Response `200 OK`** — a full `ProfileResponse` (no `stats`):
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Setup progress saved.",
+  "data": {
+    "user": { "monthly_income": 30000.00, "month_start_day": 7,
+              "onboarding_step": "income", "...": "..." },
+    "entitlement": { "plan_code": "free", "...": "..." },
+    "onboarding_complete": false,
+    "onboarding_step": "income"
+  }
+}
+```
+
+With `{"step":"done"}` the message becomes *"Setup complete. Welcome to Hisabji."*
+and `onboarding_complete` is `true`.
+
+**UI:** drive the wizard from the **server's** `onboarding_step`, never from local
+state — that is what makes progress survive a reload or a device change.
+
+---
+
+#### 6.3.7 `DELETE /users/me` 🔒
+
+Soft delete with a 30-day purge. Rate limit: **3 / day per user**.
+
+**Request** — the password is required even though the caller is authenticated:
+
+```json
+{ "password": "hisabji2026", "confirm": "DELETE", "reason": "not using it" }
+```
+
+`confirm` must be the literal string `DELETE`.
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Your account has been closed.",
+  "data": {
+    "deleted": true, "purge_after": "30 days", "can_reregister": true,
+    "message": "Your account has been closed. Your data is permanently removed after 30 days, and 017*****253 can be used to register again immediately."
+  }
+}
+```
+
+**Errors:** `UNAUTHORIZED` (401, wrong password), `VALIDATION_ERROR` (422,
+`confirm` not exactly `DELETE`).
+
+**UI:** two-step dialog — type `DELETE`, then enter the password. Show
+`data.message` verbatim on the goodbye screen; it explains re-registration.
+
+---
+
+### 6.4 Billing — `/api/v1/billing`
+
+#### 6.4.1 `GET /billing/plans` (optional auth)
+
+Public pricing page; signed in, it also marks `is_current_plan`.
+
+**Response `200 OK`** (real data, trimmed to two plans):
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Subscription plans fetched successfully.",
+  "data": [
+    {
+      "code": "free", "name": "Free", "name_bn": "ফ্রি",
+      "tagline": "Track everything. Try AI three times.",
+      "tier": "free", "period_months": 0,
+      "price": 0.00, "list_price": 0.00, "currency": "BDT",
+      "monthly_credits": 0, "signup_credits": 3, "allowance_rolls_over": false,
+      "feature_codes": ["basic_analytics", "safe_to_spend", "custom_categories", "budget_alerts"],
+      "max_devices": 2, "trial_days": 0,
+      "is_active": true, "is_popular": false, "sort_order": 10,
+      "monthly_price": 0.00, "savings_percent": 0,
+      "is_current_plan": false, "total_credits": 3
+    },
+    {
+      "code": "plus_1m", "name": "Plus Monthly", "name_bn": "প্লাস মাসিক",
+      "tagline": "Full AI coaching, one month at a time.",
+      "tier": "plus", "period_months": 1,
+      "price": 199.00, "list_price": 199.00, "currency": "BDT",
+      "monthly_credits": 50, "signup_credits": 0, "allowance_rolls_over": false,
+      "feature_codes": ["basic_analytics", "safe_to_spend", "...": "14 codes"],
+      "max_devices": 3, "trial_days": 7,
+      "is_active": true, "is_popular": false, "sort_order": 20,
+      "monthly_price": 199.00, "savings_percent": 0,
+      "is_current_plan": false, "total_credits": 50
+    }
+  ]
+}
+```
+
+**The six live plans:**
+
+| `code` | Name | Tier | Months | Price ৳ | Monthly credits | Signup credits | Trial | Devices |
+|---|---|---|---|---|---|---|---|---|
+| `free` | Free | free | 0 | 0 | 0 | 3 | 0 | 2 |
+| `plus_1m` | Plus Monthly | plus | 1 | 199 | 50 | 0 | 7 d | 3 |
+| `pro_3m` | Pro — 3 Months | pro | 3 | 499 | 100 | 0 | 0 | 4 |
+| `pro_6m` | Pro — 6 Months | pro | 6 | 899 | 100 | 100 | 0 | 5 |
+| `pro_12m` | Pro — 12 Months | pro | 12 | 1599 | 120 | 300 | 0 | 5 ⭐ popular |
+| `business_12m` | Business — 12 Months | business | 12 | 2999 | 250 | 500 | 0 | 8 |
+
+**UI:** headline `monthly_price`, sub-line the full `price`, badge
+`savings_percent` when > 0, ribbon on `is_popular`. **Never hardcode a price.**
+
+---
+
+#### 6.4.2 `GET /billing/credit-packs` (optional auth)
+
+**Response `200 OK`** (real, complete):
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Credit packs fetched successfully.",
+  "data": [
+    { "code": "tokens_20", "name": "Starter — 20 tokens", "name_bn": "স্টার্টার — ২০ টোকেন",
+      "credits": 20, "bonus_credits": 0, "price": 99.00, "list_price": 99.00,
+      "currency": "BDT", "validity_days": 0, "is_active": true, "is_popular": false,
+      "sort_order": 10, "total_credits": 20, "price_per_credit": 4.95, "savings_percent": 0 },
+    { "code": "tokens_60", "name": "Popular — 60 tokens", "name_bn": "জনপ্রিয় — ৬০ টোকেন",
+      "credits": 50, "bonus_credits": 10, "price": 199.00, "list_price": 249.00,
+      "currency": "BDT", "validity_days": 0, "is_active": true, "is_popular": true,
+      "sort_order": 20, "total_credits": 60, "price_per_credit": 3.32, "savings_percent": 20 },
+    { "code": "tokens_150", "name": "Value — 150 tokens", "credits": 120, "bonus_credits": 30,
+      "price": 399.00, "list_price": 599.00, "total_credits": 150,
+      "price_per_credit": 2.66, "savings_percent": 33, "...": "..." },
+    { "code": "tokens_400", "name": "Bulk — 400 tokens", "credits": 300, "bonus_credits": 100,
+      "price": 899.00, "list_price": 1599.00, "total_credits": 400,
+      "price_per_credit": 2.25, "savings_percent": 44, "...": "..." }
+  ]
+}
+```
+
+**UI:** show `total_credits` as the headline (it includes the bonus), then
+`price`, then `price_per_credit` as the value comparison. `validity_days: 0` means
+**never expires** — say so.
+
+---
+
+#### 6.4.3 `GET /billing/features` (optional auth)
+
+Signed in, each feature is annotated with `included_in_plan` and `affordable`, so
+one call renders every gated button correctly.
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Features fetched successfully.",
+  "data": {
+    "features": [ /* flat array, sorted */ ],
+    "by_category": {
+      "ai": [
+        { "code": "ai_quick_answer", "name": "Ask Hisabji", "name_bn": "হিসাবজিকে জিজ্ঞাসা",
+          "description": "Ask one question about your own money and get a direct answer.",
+          "kind": "ai_action", "credit_cost": 1, "min_tier": "free", "payg_allowed": true,
+          "category": "ai", "icon": "message-circle", "sort_order": 200, "is_active": true,
+          "included_in_plan": false, "affordable": true }
+      ],
+      "analytics": [ /* ... */ ], "budget": [ /* ... */ ],
+      "business": [ /* ... */ ], "core": [ /* ... */ ],
+      "savings": [ /* ... */ ], "support": [ /* ... */ ]
+    }
+  }
+}
+```
+
+**The 22 live features:**
+
+| Category | `code` | Kind | Credits | Min tier | PAYG |
+|---|---|---|---|---|---|
+| ai | `ai_quick_answer` | ai_action | 1 | free | ✅ |
+| ai | `cash_runway` | ai_action | 1 | free | ✅ |
+| ai | `budget_risk` | ai_action | 2 | plus | ✅ |
+| ai | `ai_weekly_coach` | ai_action | 2 | plus | ✅ |
+| ai | `goal_forecast` | ai_action | 2 | plus | ✅ |
+| ai | `spending_leak` | ai_action | 3 | plus | ✅ |
+| ai | `category_forecast` | ai_action | 3 | pro | ✅ |
+| ai | `savings_planner` | ai_action | 3 | pro | ✅ |
+| ai | `ai_monthly_coach` | ai_action | 5 | pro | ✅ |
+| ai | `yearly_forecast` | ai_action | 8 | pro | ✅ |
+| analytics | `basic_analytics` | module | 0 | free | ✅ |
+| analytics | `advanced_reports` | module | 0 | plus | ❌ |
+| budget | `safe_to_spend` | module | 0 | free | ✅ |
+| budget | `budget_alerts` | module | 0 | free | ✅ |
+| business | `business_mode` | module | 0 | business | ❌ |
+| business | `business_cashflow` | ai_action | 5 | business | ✅ |
+| core | `custom_categories` | module | 0 | free | ✅ |
+| core | `smart_recurring` | module | 0 | plus | ❌ |
+| core | `data_export` | module | 0 | plus | ❌ |
+| core | `family_sharing` | module | 0 | pro | ❌ |
+| savings | `goal_tracker` | module | 0 | plus | ❌ |
+| support | `priority_support` | module | 0 | pro | ❌ |
+
+`kind: "module"` = an access gate, free once unlocked. `kind: "ai_action"` = costs
+`credit_cost` **every time it runs**. `payg_allowed: false` means credits cannot
+buy it — only a plan upgrade can.
+
+---
+
+#### 6.4.4 `GET /billing/me` 🔒
+
+Everything the account screen needs in one call.
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Billing details fetched successfully.",
+  "data": {
+    "entitlement": {
+      "plan_code": "free", "tier": "free",
+      "features": ["basic_analytics", "safe_to_spend", "custom_categories", "budget_alerts"],
+      "subscription_status": "none", "days_remaining": 0,
+      "allowance_credits": 0, "purchased_credits": 3, "total_credits": 3
+    },
+    "wallet": {
+      "allowance_credits": 0, "purchased_credits": 3,
+      "lifetime_granted": 0, "lifetime_purchased": 3, "lifetime_used": 0,
+      "monthly_spend_cap": 2000, "month_spent": 0,
+      "updated_at": "2026-09-11T03:43:48.727918+06:00",
+      "total_credits": 3
+    }
+    // "subscription": { ... } — present ONLY when a live subscription exists
+  }
+}
+```
+
+`subscription` is **absent** on the free plan. After subscribing:
+
+```jsonc
+"subscription": {
+  "id": "…", "plan_code": "pro_3m", "status": "active",
+  "starts_at": "…", "ends_at": "…", "grants_made": 1,
+  "auto_renew": true, "price_paid": 499.00, "currency": "BDT",
+  "plan_name": "Pro — 3 Months", "plan_tier": "pro",
+  "days_remaining": 90, "created_at": "…", "updated_at": "…"
+}
+```
+
+**UI:** never assume `subscription` exists — optional-chain it.
+
+---
+
+#### 6.4.5 `GET /billing/wallet` 🔒
+
+The same `Wallet` object `/billing/me` nests, so you have one wallet type, not two.
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Credit balance fetched successfully.",
+  "data": {
+    "allowance_credits": 0, "purchased_credits": 3, "total_credits": 3,
+    "lifetime_granted": 0, "lifetime_purchased": 3, "lifetime_used": 0,
+    "monthly_spend_cap": 2000, "month_spent": 0,
+    "updated_at": "2026-09-11T03:43:48.727918+06:00"
+  }
+}
+```
+
+**UI:** show allowance and purchased **separately**. Spend order is allowance
+first, purchased second — a subscriber's bought credits survive as long as
+possible, and users notice when you hide that.
+
+---
+
+#### 6.4.6 `GET /billing/ledger?page=1&limit=20` 🔒
+
+Where the credits went — immutable, newest first. **Paginated** (`page`, `limit`;
+limit capped at 100).
+
+**Response `200 OK`**
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Credit history fetched successfully.",
+  "data": [
+    {
+      "id": 22, "delta": 3,
+      "allowance_after": 0, "purchased_after": 3,
+      "reason": "signup_bonus",
+      "description": "Welcome bonus: 3 free AI credits",
+      "created_at": "2026-09-11T03:43:48.727918+06:00"
+    }
+  ],
+  "meta": { "page": 1, "limit": 2, "total_items": 1, "total_pages": 1,
+            "count": 1, "has_next": false, "has_prev": false }
+}
+```
+
+`reason` ∈ `signup_bonus` | `plan_grant` | `plan_signup_bonus` | `pack_purchase` |
+`feature_use` | `refund` | `expiry` | `admin_adjust` | `promo`.
+`delta` is negative for `feature_use`; `feature_code` is then set.
+
+**UI:** `+3` in income green, `−5` in expense red, `reason` translated through
+i18next (`billing.ledger.reason.signup_bonus`), `description` shown as the server
+sent it.
+
+---
+
+#### 6.4.7 `GET /billing/payments?page=1&limit=20` 🔒
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Payment history fetched successfully.",
+  "data": [
+    {
+      "id": "c0bf38ba-817e-4613-a106-6fad3ea20d8a",
+      "kind": "credit_pack", "reference_code": "tokens_60", "quantity": 1,
+      "amount": 199.00, "currency": "BDT",
+      "provider": "manual", "provider_ref": null,
+      "status": "paid",
+      "paid_at": "2026-09-11T03:43:50.457723+06:00",
+      "refund_amount": 0.00,
+      "created_at": "...", "updated_at": "..."
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "total_items": 1, "...": "..." }
+}
+```
+
+`status` ∈ `pending` | `processing` | `paid` | `failed` | `cancelled` | `refunded`.
+`kind` ∈ `subscription` | `credit_pack`.
+
+---
+
+#### 6.4.8 `GET /billing/features/:code/access` 🔒
+
+"Can I run this, and what will it cost?" — call it before rendering any gated
+button. `:code` is a feature code from §6.4.3.
+
+**Response `200 OK`** (free user, 3 credits, asking for a 5-credit pro feature):
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Feature access checked successfully.",
+  "data": {
+    "feature": {
+      "code": "ai_monthly_coach", "name": "AI Monthly Coach", "name_bn": "মাসিক কোচ",
+      "description": "A full monthly report: mistakes, comparisons and the three actions that matter most.",
+      "kind": "ai_action", "credit_cost": 5, "min_tier": "pro", "payg_allowed": true,
+      "category": "ai", "icon": "sparkles", "sort_order": 280, "is_active": true,
+      "included_in_plan": false, "affordable": false
+    },
+    "allowed": false,
+    "reason": "This uses 5 credits and you have 3.",
+    "credit_cost": 5,
+    "entitlement": { "plan_code": "free", "tier": "free", "total_credits": 3, "...": "..." },
+    "needs_upgrade": true,
+    "needs_credits": true
+  }
+}
+```
+
+**Errors:** `NOT_FOUND` (404, unknown feature code), `VALIDATION_ERROR` (422, `:code`
+is not a valid slug).
+
+**UI:** this endpoint **never spends anything**. It is safe to call on render, and
+the server re-checks everything before it debits — so a stale check can never grant
+free usage.
+
+---
+
+#### 6.4.9 `POST /billing/credits/buy` 🔒
+
+Rate limit: **20 / hour per user**. Send `X-Idempotency-Key`.
+
+**Request** `{ "pack_code": "tokens_60" }`
+
+**Response `201 CREATED`**
+
+```jsonc
+{
+  "success": true, "code": "CREATED",
+  "message": "Checkout started. Complete the payment to receive your credits.",
+  "data": {
+    "payment": {
+      "id": "c0bf38ba-817e-4613-a106-6fad3ea20d8a",
+      "kind": "credit_pack", "reference_code": "tokens_60", "quantity": 1,
+      "amount": 199.00, "currency": "BDT",
+      "provider": "manual", "status": "pending", "refund_amount": 0.00,
+      "created_at": "...", "updated_at": "..."
+    },
+    "instructions": "Send BDT 199.00 and share the transaction id with support, quoting reference c0bf38ba-817e-4613-a106-6fad3ea20d8a. Your purchase is applied as soon as the payment is confirmed.",
+    "already_processed": false
+  }
+}
+```
+
+With a hosted gateway there will also be a `payment_url` — redirect to it when
+present. With `PAYMENT_PROVIDER=manual` (today) there is none; show
+`instructions` verbatim.
+
+**Idempotent replay** returns `200` with `already_processed: true` and the same
+payment — do not show a second payment screen.
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `NOT_FOUND` | 404 | unknown pack code |
+| `CONFLICT` | 409 | that pack is no longer available (`is_active: false`) |
+| `IDEMPOTENCY_CONFLICT` | 409 | the key was already used for a **different** purchase — generate a fresh one |
+| `VALIDATION_ERROR` | 422 | missing or over-long `pack_code` |
+| `RATE_LIMIT_EXCEEDED` | 429 | more than 20 checkouts in an hour |
+
+Unlike a subscription there is **no** "you already have one" check — credit packs
+stack, so a user can buy several.
+
+---
+
+#### 6.4.10 `POST /billing/subscribe` 🔒
+
+Rate limit: **10 / hour per user**. Send `X-Idempotency-Key`.
+
+**Request** `{ "plan_code": "pro_3m" }`
+
+**Response `201 CREATED`** — same `CheckoutResult` shape, with
+`payment.kind: "subscription"`.
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `BAD_REQUEST` | 400 | `plan_code: "free"` — *"The free plan does not need to be purchased."* |
+| `NOT_FOUND` | 404 | unknown plan code |
+| `CONFLICT` | 409 | a live subscription already exists — `details.current_plan`, `details.expires_at`. Two different messages: *"You are already subscribed to this plan."* when the codes match, *"You already have an active subscription."* otherwise |
+| `CONFLICT` | 409 | that plan is no longer available (`is_active: false`) |
+| `IDEMPOTENCY_CONFLICT` | 409 | the key was already used for a **different** purchase |
+| `RATE_LIMIT_EXCEEDED` | 429 | more than 10 checkouts in an hour |
+
+**UI:** the "already subscribed" 409 is a real product state, not an error to
+toast away. Send the user to the account screen showing
+`details.current_plan` and `details.expires_at`, with a **Cancel** CTA — a plan
+can only be changed after the current one ends.
+
+---
+
+#### 6.4.11 `POST /billing/subscription/cancel` 🔒
+
+Turns off auto-renew. **Access continues until `ends_at`** — the user paid for that
+time. Rate limit: **5 / hour per user**. An empty body is valid.
+
+**Request** `{ "reason": "too expensive" }` (optional, ≤300 chars)
+
+**Response `200 OK`** — the updated `Subscription`:
+
+```jsonc
+{
+  "success": true, "code": "OK",
+  "message": "Subscription cancelled. You keep access until it expires.",
+  "data": {
+    "id": "...", "plan_code": "pro_3m", "status": "active",
+    "starts_at": "...", "ends_at": "2026-12-11T...",
+    "auto_renew": false,
+    "cancelled_at": "...", "cancel_reason": "too expensive",
+    "price_paid": 499.00, "currency": "BDT",
+    "days_remaining": 90, "...": "..."
+  }
+}
+```
+
+**Errors**
+
+| Code | HTTP | When |
+|---|---|---|
+| `NOT_FOUND` | 404 | no active subscription — hint: *"You are on the free plan; there is nothing to cancel."* Hide the cancel button when `/billing/me` has no `subscription`. |
+| `CONFLICT` | 409 | already cancelled — `details.access_until` |
+| `RATE_LIMIT_EXCEEDED` | 429 | more than 5 cancellations in an hour |
+
+**UI:** say *"Active until 11 Dec 2026"*, not *"Cancelled"* — `auto_renew: false`
+with `status: "active"` is a live subscription that will not renew. The `reason`
+you send is stored as product feedback; a failure to store it never fails the
+cancellation.
+
+---
+
+#### 6.4.12 `POST /billing/payments/confirm` 🔒 — **sandbox only**
+
+> This route is **registered only when `PAYMENT_SANDBOX=true`**. In production a
+> gateway webhook settles payments and this endpoint **does not exist** — its
+> absence is the security control. Build your success screen to poll
+> `GET /billing/me`, not to call confirm.
+
+**Request** `{ "payment_id": "c0bf38ba-817e-4613-a106-6fad3ea20d8a" }`
+
+**Response `200 OK`** (credit pack):
+
+```jsonc
+{
+  "success": true, "code": "OK", "message": "Payment confirmed. Your purchase is active.",
+  "data": {
+    "already_confirmed": false,
+    "payment_id": "c0bf38ba-817e-4613-a106-6fad3ea20d8a",
+    "pack_code": "tokens_60",
+    "credits_granted": 60,
+    "wallet": {
+      "allowance_credits": 0, "purchased_credits": 63,
+      "lifetime_granted": 0, "lifetime_purchased": 63, "lifetime_used": 0,
+      "monthly_spend_cap": 2000, "month_spent": 0,
+      "updated_at": "...", "total_credits": 63
+    }
+  }
+}
+```
+
+**Response `200 OK`** (subscription): `{ "subscription": {…}, "plan_code": "pro_3m",
+"expires_at": "…", "credits_granted": 100, "payment_id": "…", "already_confirmed": false }`.
+
+Confirming twice returns `already_confirmed: true` — idempotent, not an error.
+
+**Errors:** `NOT_FOUND` (404 — also returned for someone else's payment, so the
+endpoint cannot be used to discover payment ids), `CONFLICT` (409, refunded or
+cancelled payment).
+
+---
+
+### 6.5 The billing model (what the UI must communicate)
+
+Everything premium is metered in one currency: **credits** ("tokens"). Two ways to
+get them:
+
+1. **Subscribe** — a plan grants `monthly_credits` each billing month and unlocks a
+   set of `feature_codes`.
 2. **Buy a pack** — one-off credits that never expire.
 
-`GET /billing/features/:code/access` answers "can this user run this feature?" and
-returns the reason, so **the button label is data-driven**:
+`GET /billing/features/:code/access` makes the **button label data-driven**:
 
 | Response | Button |
 |---|---|
@@ -552,22 +1833,59 @@ returns the reason, so **the button label is data-driven**:
 | `allowed: false`, `needs_credits: true` | **Buy credits** |
 | `allowed: false`, `needs_upgrade: true`, `needs_credits: false` | **Upgrade to Pro** |
 
-Spend order is allowance first, purchased second — so a subscriber's bought credits
-survive as long as possible. Show both numbers separately in the wallet.
+Spend order: allowance first, purchased second. `monthly_spend_cap` (default 2000)
+is a safety cap on credits spent per month — surface it in the wallet before a
+heavy user hits it as a surprise.
 
 ---
 
-## 6. Endpoint reference — planned (NOT yet implemented)
+### 6.6 Changelog — 2.1
 
-These will return `404 ROUTE_NOT_FOUND` today. Build the screens and typed stubs,
-but **gate them behind a flag defaulting to off**. The shapes below are the agreed
-contract and will not change.
+Re-verified against the Go source on **2026-09-11**. **No endpoint was added,
+removed, renamed or re-authed**, and every rate limit in §4.8 still matches the
+route files. What changed is accuracy of the error tables and two response bodies.
+
+**Breaking for a client that trusted the old text:**
+
+| § | Was | Is |
+|---|---|---|
+| 6.2.3 | `data.phone` echoed the number you sent | **Masked** — `017*****253`. Display only; keep the real number client-side. |
+| 6.2.6 | same | same — masked |
+| 6.3.4 | `currency` accepted any 3 letters | Only `BDT`; anything else is `422 INVALID_FIELD` |
+| 6.3.5 | reserved username → `CONFLICT` | `DUPLICATE_ENTRY` (same 409, different code) |
+
+**Errors that were missing and could reach a client:**
+
+| § | Added |
+|---|---|
+| 6.2.2 | `OTP_LIMIT_REACHED` (429) — too many wrong guesses burns the code. "No pending OTP" is `OTP_INVALID` (400), **not** the `NOT_FOUND` previously listed. |
+| 6.2.5 | `TOKEN_EXPIRED` (401), `ACCOUNT_SUSPENDED` (403) |
+| 6.4.8 | `VALIDATION_ERROR` (422) on a non-slug `:code` |
+| 6.4.9 | `CONFLICT` (409, pack inactive), `IDEMPOTENCY_CONFLICT` (409) |
+| 6.4.10 | `CONFLICT` (409, plan inactive), `IDEMPOTENCY_CONFLICT` (409), `RATE_LIMIT_EXCEEDED` (429) |
+| 6.4.11 | the whole errors table — `NOT_FOUND` (404), `CONFLICT` (409), `RATE_LIMIT_EXCEEDED` (429) |
+
+**Clarified, nothing to change in a client:**
+
+- §4.3 — there are **five** `402` codes, not four.
+- §6.1.1 — `data.docs` points at `/docs`, which is not a mounted route (404).
+- §6.2.4 — `ACCOUNT_LOCKED` carries `locked_until` and `minutes_remaining`; the
+  rule is 5 failed attempts → 6-hour lock, and a password reset clears it.
+- §6.3.2 — `password_changed_at` is also never returned; `entitlement` and `stats`
+  can be absent from a 200 when their lookups fail.
+
+---
+
+## 7. Endpoint reference — planned (NOT yet implemented)
+
+These return `404 ROUTE_NOT_FOUND` today. Build screens and typed stubs, but **gate
+them behind a flag defaulting to off**. The shapes are the agreed contract.
 
 ```ts
 export const flags = {
   expenses: false, income: false, categories: false, recurring: false,
   budgets: false, goals: false, dashboard: false, analytics: false,
-  ai: false, notifications: false,
+  ai: false, notifications: false, admin: false,
 } as const;
 ```
 
@@ -583,9 +1901,10 @@ export const flags = {
 | Analytics | `GET /analytics/weekly`, `/monthly`, `/yearly`, `/categories` |
 | AI | `POST /ai/:feature_code`, `GET /ai/insights`, `GET /ai/insights/:id`, `POST /ai/insights/:id/feedback` |
 | Notifications | `GET /notifications`, `POST /notifications/:id/read`, `POST /notifications/read-all` |
+| **Admin** | see §14.2 |
 
-All list endpoints will follow §3.7 exactly. `GET /dashboard` is the important one
-— it will return the whole home screen in a single call:
+All list endpoints will follow §4.7 exactly. `GET /dashboard` is the important one —
+the whole home screen in a single call:
 
 ```ts
 export interface DashboardResponse {
@@ -606,10 +1925,10 @@ export interface DashboardResponse {
 
 ---
 
-## 7. TypeScript types
+## 8. TypeScript types
 
-Create `src/types/api.ts` with exactly this. These are transcribed from the Go
-structs — do not "improve" them.
+Create `src/types/api.ts` with exactly this. Transcribed from the Go structs — do
+not "improve" them.
 
 ```ts
 /* ─── envelope ─────────────────────────────────────────────────────────── */
@@ -655,7 +1974,9 @@ export type ApiErrorCode =
   | "UPSTREAM_ERROR" | "SERVICE_UNAVAILABLE" | "TIMEOUT";
 
 /* ─── domain ───────────────────────────────────────────────────────────── */
+export type Locale = "bn" | "en";
 export type UserType = "personal" | "student" | "job_holder" | "business" | "freelancer" | "family";
+export type Role = "user" | "admin" | "support";
 export type OnboardingStep = "profile" | "income" | "categories" | "budget" | "done";
 export type Tier = "free" | "plus" | "pro" | "business";
 export type Health = "safe" | "warning" | "critical";
@@ -665,9 +1986,9 @@ export interface User {
   id: string; name: string;
   username: string | null; email: string | null; phone: string;
   avatar_path: string | null;
-  user_type: UserType; role: "user" | "admin" | "support";
+  user_type: UserType; role: Role;
   status: "active" | "suspended" | "deleted";
-  locale: "bn" | "en"; currency: string; timezone: string;
+  locale: Locale; currency: string; timezone: string;
   monthly_income: number; month_start_day: number;
   phone_verified: boolean; phone_verified_at?: string;
   email_verified: boolean; email_verified_at?: string;
@@ -690,7 +2011,9 @@ export interface AuthResponse {
 }
 
 export interface OTPResponse {
-  phone: string; purpose: string; expires_at: string;
+  /** MASKED, e.g. "017*****253". Display only — never send it back. */
+  phone: string;
+  purpose: string; expires_at: string;
   resend_after_seconds: number; attempts_left: number; dev_otp?: string;
 }
 
@@ -700,9 +2023,13 @@ export interface SessionInfo {
   created_at: string; revoked_at?: string;
 }
 
+export type SubscriptionStatus =
+  | "none" | "pending" | "trialing" | "active" | "grace"
+  | "expired" | "cancelled" | "refunded";
+
 export interface Entitlement {
   plan_code: string; tier: Tier; features: string[];
-  subscription_status: "none" | "pending" | "trialing" | "active" | "grace" | "expired" | "cancelled" | "refunded";
+  subscription_status: SubscriptionStatus;
   expires_at?: string; days_remaining: number;
   allowance_credits: number; purchased_credits: number; total_credits: number;
 }
@@ -760,19 +2087,30 @@ export interface Feature {
   included_in_plan: boolean; affordable: boolean;
 }
 
+export interface FeatureCatalogue {
+  features: Feature[];
+  by_category: Record<string, Feature[]>;
+}
+
 export interface Access {
   feature: Feature; allowed: boolean; reason: string; credit_cost: number;
   entitlement: Entitlement; needs_upgrade: boolean; needs_credits: boolean;
 }
 
 export interface Subscription {
-  id: string; plan_code: string; status: Entitlement["subscription_status"];
+  id: string; plan_code: string; status: SubscriptionStatus;
   starts_at: string; ends_at: string; grace_until?: string; next_grant_at?: string;
   grants_made: number; auto_renew: boolean;
   cancelled_at?: string; cancel_reason?: string; payment_id?: string;
   price_paid: number; currency: string;
   plan_name?: string; plan_tier?: string; days_remaining: number;
   created_at: string; updated_at: string;
+}
+
+export interface BillingMe {
+  entitlement: Entitlement;
+  wallet: Wallet;
+  subscription?: Subscription;      // absent on the free plan
 }
 
 export interface Payment {
@@ -789,16 +2127,30 @@ export interface CheckoutResult {
   instructions: string; already_processed: boolean;
 }
 
+export type LedgerReason =
+  | "signup_bonus" | "plan_grant" | "plan_signup_bonus" | "pack_purchase"
+  | "feature_use" | "refund" | "expiry" | "admin_adjust" | "promo";
+
 export interface LedgerEntry {
   id: number; delta: number;
   allowance_after: number; purchased_after: number;
-  reason: "signup_bonus" | "plan_grant" | "plan_signup_bonus" | "pack_purchase"
-        | "feature_use" | "refund" | "expiry" | "admin_adjust" | "promo";
+  reason: LedgerReason;
   feature_code?: string; reference_type?: string; reference_id?: string;
   description: string | null; created_at: string;
 }
 
-/* ─── planned (§6) ─────────────────────────────────────────────────────── */
+export interface ConfirmResult {
+  already_confirmed: boolean;
+  payment_id: string;
+  pack_code?: string;               // credit-pack payments
+  plan_code?: string;               // subscription payments
+  expires_at?: string;
+  credits_granted?: number;
+  wallet?: Wallet;
+  subscription?: Subscription;
+}
+
+/* ─── planned (§7) ─────────────────────────────────────────────────────── */
 export interface Category {
   id: string; parent_id?: string; slug: string;
   name: string; name_bn?: string; icon: string; color: string;
@@ -828,9 +2180,9 @@ export interface CategorySpend {
 
 ---
 
-## 8. The API client
+## 9. The API client
 
-### 8.1 `src/lib/api/errors.ts`
+### 9.1 `src/lib/api/errors.ts`
 
 ```ts
 import type { ApiFailure, FieldError, ApiErrorCode } from "@/types/api";
@@ -855,21 +2207,21 @@ export class ApiError extends Error {
   }
 
   /** Should the paywall open? */
-  get isPaywall() {
-    return this.status === 402;
-  }
+  get isPaywall() { return this.status === 402; }
   /** Should the form show inline field errors rather than a toast? */
-  get isValidation() {
-    return this.errors.length > 0;
-  }
+  get isValidation() { return this.errors.length > 0; }
   get retryAfterSeconds(): number | undefined {
     const v = this.details?.retry_after_seconds;
+    return typeof v === "number" ? v : undefined;
+  }
+  get attemptsLeft(): number | undefined {
+    const v = this.details?.attempts_left ?? this.details?.attempts_remaining;
     return typeof v === "number" ? v : undefined;
   }
 }
 ```
 
-### 8.2 `src/lib/api/server.ts` — for Server Components and Route Handlers
+### 9.2 `src/lib/api/server.ts` — for Server Components and Route Handlers
 
 ```ts
 import "server-only";
@@ -909,10 +2261,10 @@ export async function apiFetch<T>(
 }
 ```
 
-### 8.3 `src/app/api/hisabji/[...path]/route.ts` — the proxy
+### 9.3 `src/app/api/hisabji/[...path]/route.ts` — the proxy
 
-This is the only place a token is attached for browser-originated calls, and the
-only place a refresh happens. **The single-flight lock is not optional** — see §4.3.
+The only place a token is attached for browser calls, and the only place a refresh
+happens. **The single-flight lock is not optional** — see §5.3.
 
 ```ts
 import { NextRequest, NextResponse } from "next/server";
@@ -939,13 +2291,12 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 
       const t = body.data.tokens;
       const jar = await cookies();
+      const secure = process.env.NODE_ENV === "production";
       jar.set("hisabji_at", t.access_token, {
-        httpOnly: true, secure: process.env.NODE_ENV === "production",
-        sameSite: "lax", path: "/", maxAge: t.expires_in,
+        httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: t.expires_in,
       });
       jar.set("hisabji_rt", t.refresh_token, {
-        httpOnly: true, secure: process.env.NODE_ENV === "production",
-        sameSite: "lax", path: "/api", maxAge: 60 * 60 * 24 * 30,
+        httpOnly: true, secure, sameSite: "lax", path: "/api", maxAge: 60 * 60 * 24 * 30,
       });
       return t.access_token as string;
     } finally {
@@ -1002,7 +2353,7 @@ export const PUT = proxy;
 export const DELETE = proxy;
 ```
 
-### 8.4 `src/lib/api/client.ts` — for Client Components
+### 9.4 `src/lib/api/client.ts` — for Client Components
 
 ```ts
 "use client";
@@ -1038,10 +2389,10 @@ export const api = {
 };
 ```
 
-### 8.5 Auth route handlers
+### 9.5 Auth route handlers
 
-`src/app/api/auth/login/route.ts` (mirror for `verify-otp`, and a `logout` that
-clears both cookies):
+`src/app/api/auth/login/route.ts` — mirror it for `verify-otp` and `refresh`, and
+add a `logout` that clears both cookies:
 
 ```ts
 import { NextRequest, NextResponse } from "next/server";
@@ -1072,30 +2423,35 @@ export async function POST(req: NextRequest) {
 
 ---
 
-## 9. TanStack Query + forms
+## 10. TanStack Query + forms
 
-### 9.1 Query keys
+### 10.1 Query keys
 
 ```ts
 export const qk = {
-  profile: (stats = false) => ["profile", { stats }] as const,
+  profile:  (stats = false) => ["profile", { stats }] as const,
   sessions: () => ["sessions"] as const,
   billing:  () => ["billing", "me"] as const,
   wallet:   () => ["billing", "wallet"] as const,
   ledger:   (page: number) => ["billing", "ledger", page] as const,
+  payments: (page: number) => ["billing", "payments", page] as const,
   plans:    () => ["billing", "plans"] as const,
   packs:    () => ["billing", "packs"] as const,
   features: () => ["billing", "features"] as const,
   access:   (code: string) => ["billing", "access", code] as const,
+  username: (name: string) => ["username", name] as const,
   // planned
-  expenses: (params: Record<string, unknown>) => ["expenses", params] as const,
+  expenses:  (params: Record<string, unknown>) => ["expenses", params] as const,
   dashboard: (period?: string) => ["dashboard", period] as const,
+  // admin
+  adminStats: () => ["admin", "stats"] as const,
+  adminUsers: (params: Record<string, unknown>) => ["admin", "users", params] as const,
 } as const;
 ```
 
-### 9.2 Global error handling
+### 10.2 Global error handling
 
-Do the 401 and 402 handling **once**, in the QueryClient, not per screen:
+Do 401 and 402 **once**, in the QueryClient, not per screen:
 
 ```tsx
 "use client";
@@ -1129,14 +2485,15 @@ export function makeQueryClient(onPaywall: (e: ApiError) => void) {
 }
 ```
 
-### 9.3 Server errors → form fields
+### 10.3 Server errors → form fields
 
 ```ts
 import type { UseFormSetError, FieldValues, Path } from "react-hook-form";
 import { ApiError } from "@/lib/api/errors";
+import type { Locale } from "@/types/api";
 
 export function applyServerErrors<T extends FieldValues>(
-  error: unknown, setError: UseFormSetError<T>, locale: "bn" | "en" = "bn",
+  error: unknown, setError: UseFormSetError<T>, locale: Locale = "bn",
 ): boolean {
   if (!(error instanceof ApiError) || !error.isValidation) return false;
   for (const e of error.errors) {
@@ -1145,47 +2502,335 @@ export function applyServerErrors<T extends FieldValues>(
       message: locale === "bn" && e.message_bn ? e.message_bn : e.message,
     });
   }
-  return true;   // handled — caller should not toast
+  return true;   // handled — the caller should not toast
 }
 ```
 
 Mirror the backend rules in zod so most errors never reach the network — but
-**always** apply the server errors too, because uniqueness (`phone` already
-registered) can only be known server-side.
+**always** apply the server errors too, because uniqueness (phone already
+registered) can only be known server-side. Zod messages come from i18next (§11.5),
+never as literals:
 
 ```ts
-export const phoneSchema = z.string()
-  .regex(/^(?:\+?880|0)1[3-9]\d{8}$/, "সঠিক মোবাইল নম্বর দিন, যেমন ০১৭১২৩৪৫৬৭৮।");
-
-export const passwordSchema = z.string()
-  .min(8, "কমপক্ষে ৮ অক্ষর")
-  .regex(/[A-Za-z]/, "অন্তত একটি অক্ষর থাকতে হবে")
-  .regex(/[0-9]/, "অন্তত একটি সংখ্যা থাকতে হবে");
-
-export const usernameSchema = z.string()
-  .regex(/^[a-z0-9][a-z0-9_.]{1,28}[a-z0-9]$/, "৩-৩০ অক্ষর, ছোট হাতের অক্ষর ও সংখ্যা");
+export const makeSchemas = (t: TFunction) => ({
+  phone: z.string().regex(/^(?:\+?880|0)1[3-9]\d{8}$/, t("validation.phone")),
+  password: z.string()
+    .min(8, t("validation.passwordMin"))
+    .regex(/[A-Za-z]/, t("validation.passwordLetter"))
+    .regex(/[0-9]/, t("validation.passwordDigit")),
+  username: z.string().regex(/^[a-z0-9][a-z0-9_.]{1,28}[a-z0-9]$/, t("validation.username")),
+});
 ```
 
 ---
 
-## 10. Design system
+## 11. i18next — Bangla ⇄ English
 
-### 10.1 Principles
+Default **`bn`**, fallback `en`. Adding a third language later must mean: create one
+folder, add one array entry. Nothing else.
+
+### 11.1 Structure
+
+```
+src/i18n/
+  settings.ts              locales, default, namespaces
+  server.ts                getT()  — Server Components
+  client.ts                useT()  — Client Components
+  provider.tsx             <I18nProvider>
+  locales/
+    bn/  common.json auth.json onboarding.json dashboard.json
+         billing.json settings.json admin.json errors.json validation.json
+    en/  (the same files)
+```
+
+Route shape: `src/app/[locale]/…` — the locale is in the URL, so a shared link
+keeps its language and the server can render the right text.
+
+### 11.2 `src/i18n/settings.ts`
+
+```ts
+export const locales = ["bn", "en"] as const;      // ← add "hi" here and nothing else changes
+export type AppLocale = (typeof locales)[number];
+
+export const defaultLocale: AppLocale = "bn";
+export const cookieName = "NEXT_LOCALE";
+
+export const namespaces = [
+  "common", "auth", "onboarding", "dashboard",
+  "billing", "settings", "admin", "errors", "validation",
+] as const;
+export const defaultNS = "common";
+
+export function i18nOptions(locale: AppLocale, ns: string | string[] = defaultNS) {
+  return {
+    supportedLngs: locales,
+    fallbackLng: "en",
+    lng: locale,
+    fallbackNS: defaultNS,
+    defaultNS,
+    ns,
+    interpolation: { escapeValue: false },   // React already escapes
+  };
+}
+```
+
+### 11.3 `src/i18n/server.ts`
+
+```ts
+import "server-only";
+import { createInstance, type i18n } from "i18next";
+import { initReactI18next } from "react-i18next/initReactI18next";
+import resourcesToBackend from "i18next-resources-to-backend";
+import { i18nOptions, type AppLocale } from "./settings";
+
+async function initI18next(locale: AppLocale, ns: string | string[]): Promise<i18n> {
+  const instance = createInstance();
+  await instance
+    .use(initReactI18next)
+    .use(resourcesToBackend((lng: string, namespace: string) =>
+      import(`./locales/${lng}/${namespace}.json`)))
+    .init(i18nOptions(locale, ns));
+  return instance;
+}
+
+/** Use inside Server Components and Route Handlers. */
+export async function getT(locale: AppLocale, ns: string | string[] = "common") {
+  const i18nextInstance = await initI18next(locale, ns);
+  return {
+    t: i18nextInstance.getFixedT(locale, Array.isArray(ns) ? ns[0] : ns),
+    i18n: i18nextInstance,
+  };
+}
+```
+
+### 11.4 Client provider and hook
+
+`src/i18n/provider.tsx`:
+
+```tsx
+"use client";
+import { createInstance } from "i18next";
+import { I18nextProvider, initReactI18next } from "react-i18next";
+import resourcesToBackend from "i18next-resources-to-backend";
+import { i18nOptions, type AppLocale } from "./settings";
+import { useState } from "react";
+
+export function I18nProvider({
+  locale, resources, children,
+}: { locale: AppLocale; resources: Record<string, unknown>; children: React.ReactNode }) {
+  const [instance] = useState(() => {
+    const i = createInstance();
+    i.use(initReactI18next)
+     .use(resourcesToBackend((lng: string, ns: string) =>
+        import(`./locales/${lng}/${ns}.json`)))
+     .init({ ...i18nOptions(locale, Object.keys(resources)), resources: { [locale]: resources } });
+    return i;
+  });
+  return <I18nextProvider i18n={instance}>{children}</I18nextProvider>;
+}
+```
+
+`src/app/[locale]/layout.tsx`:
+
+```tsx
+import { notFound } from "next/navigation";
+import { locales, type AppLocale } from "@/i18n/settings";
+import { I18nProvider } from "@/i18n/provider";
+import { anek, inter } from "../fonts";
+
+export function generateStaticParams() {
+  return locales.map((locale) => ({ locale }));
+}
+
+export default async function LocaleLayout({
+  children, params,
+}: { children: React.ReactNode; params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
+  if (!locales.includes(locale as AppLocale)) notFound();
+
+  const common = (await import(`@/i18n/locales/${locale}/common.json`)).default;
+
+  return (
+    // lang drives the font stack and line-height in §12.3 — it is not decoration
+    <html lang={locale} className={`${anek.variable} ${inter.variable}`}>
+      <body>
+        <I18nProvider locale={locale as AppLocale} resources={{ common }}>
+          {children}
+        </I18nProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+Middleware redirects a bare `/` to the cookie's locale, or `bn`:
+
+```ts
+// src/middleware.ts
+import { NextRequest, NextResponse } from "next/server";
+import acceptLanguage from "accept-language";
+import { locales, defaultLocale, cookieName } from "@/i18n/settings";
+
+acceptLanguage.languages([...locales]);
+
+export const config = {
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+};
+
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  if (locales.some((l) => pathname.startsWith(`/${l}`))) return NextResponse.next();
+
+  const locale =
+    req.cookies.get(cookieName)?.value ??
+    acceptLanguage.get(req.headers.get("Accept-Language")) ??
+    defaultLocale;
+
+  return NextResponse.redirect(new URL(`/${locale}${pathname}${req.nextUrl.search}`, req.url));
+}
+```
+
+### 11.5 Resource files
+
+Keep keys **semantic**, not literal (`auth.login.submit`, never `auth.signInButton`).
+`src/i18n/locales/bn/auth.json`:
+
+```json
+{
+  "login": {
+    "title": "সাইন ইন করুন",
+    "identifier": "মোবাইল, ইমেইল বা ইউজারনেম",
+    "password": "পাসওয়ার্ড",
+    "submit": "সাইন ইন",
+    "forgot": "পাসওয়ার্ড ভুলে গেছেন?",
+    "attemptsLeft_one": "আর {{count}} বার চেষ্টা করতে পারবেন",
+    "attemptsLeft_other": "আর {{count}} বার চেষ্টা করতে পারবেন"
+  },
+  "otp": {
+    "title": "মোবাইল নম্বর যাচাই",
+    "sentTo": "{{phone}} নম্বরে কোড পাঠানো হয়েছে",
+    "resendIn": "{{seconds}} সেকেন্ড পর আবার পাঠাতে পারবেন",
+    "resend": "আবার কোড পাঠান"
+  }
+}
+```
+
+`src/i18n/locales/bn/errors.json` — **keyed by the API's error `code`**, so server
+copy can be overridden without touching any component:
+
+```json
+{
+  "VALIDATION_ERROR": "কিছু তথ্য সঠিক নয়। নিচে দেখুন।",
+  "UNAUTHORIZED": "সাইন ইন করুন।",
+  "ACCOUNT_LOCKED": "অনেকবার ভুল হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।",
+  "OTP_INVALID": "কোডটি সঠিক নয়।",
+  "RATE_LIMIT_EXCEEDED": "একটু ধীরে চেষ্টা করুন।",
+  "INSUFFICIENT_CREDITS": "পর্যাপ্ত ক্রেডিট নেই।",
+  "SUBSCRIPTION_REQUIRED": "এই সুবিধাটির জন্য প্ল্যান আপগ্রেড করতে হবে।",
+  "INTERNAL_ERROR": "কিছু একটা সমস্যা হয়েছে। আবার চেষ্টা করুন।",
+  "fallback": "কিছু একটা সমস্যা হয়েছে।"
+}
+```
+
+### 11.6 Server messages vs. UI copy — the rule
+
+The API sends `message` (English) and, on validation errors, `message_bn`. Decide
+once, in one helper:
+
+```ts
+import i18next from "i18next";
+import { ApiError } from "@/lib/api/errors";
+
+/** Field errors: prefer the server's own Bangla — it names the actual field. */
+export const fieldMessage = (e: FieldError, locale: Locale) =>
+  locale === "bn" && e.message_bn ? e.message_bn : e.message;
+
+/** Top-level errors: prefer OUR translation, fall back to the server's message. */
+export function errorMessage(err: ApiError): string {
+  const key = `errors:${err.code}`;
+  return i18next.exists(key) ? i18next.t(key) : err.message;
+}
+```
+
+**Language switcher** — cookie + URL + (when signed in) the server:
+
+```tsx
+"use client";
+import { usePathname, useRouter } from "next/navigation";
+import { useTranslation } from "react-i18next";
+import { api } from "@/lib/api/client";
+import { locales, cookieName, type AppLocale } from "@/i18n/settings";
+
+export function LanguageSwitcher({ signedIn }: { signedIn: boolean }) {
+  const { i18n } = useTranslation();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  async function switchTo(next: AppLocale) {
+    document.cookie = `${cookieName}=${next}; path=/; max-age=31536000; samesite=lax`;
+    await i18n.changeLanguage(next);
+    // Persist to the account so the choice follows the user to a new device.
+    if (signedIn) {
+      await api.patch("/users/me/preferences", { locale: next }).catch(() => {});
+    }
+    const rest = pathname.replace(/^\/(bn|en)/, "");
+    router.push(`/${next}${rest || "/"}`);
+    router.refresh();   // re-render Server Components in the new language
+  }
+
+  return (
+    <div role="group" aria-label="Language">
+      {locales.map((l) => (
+        <button key={l} onClick={() => switchTo(l)} aria-pressed={i18n.language === l}>
+          {l === "bn" ? "বাংলা" : "English"}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+On sign-in, if `user.locale` differs from the cookie, follow **the account** — it is
+the user's deliberate choice, made on some device.
+
+### 11.7 Numerals and formatting
+
+- **Digits stay Latin** (`123`, not `১২৩`) for money, dates and counts. Bengali
+  numerals break tabular alignment and are harder to scan in a ledger. Bangla text,
+  Latin figures — this is how Bangladeshi banking apps actually present numbers.
+- Plurals use i18next's `_one` / `_other` suffixes, never string concatenation.
+- Relative dates ("আজ", "গতকাল") for the last 7 days, absolute after that.
+- Always send `Accept-Language` (§9.2, §9.3 already do).
+
+### 11.8 Adding a third language later
+
+1. `cp -r src/i18n/locales/en src/i18n/locales/hi`
+2. Translate the JSON files.
+3. Add `"hi"` to `locales` in `settings.ts`.
+
+That is the whole change — because no component contains a literal string.
+
+---
+
+## 12. Design system
+
+### 12.1 Principles
 
 1. **Bangla first.** Every string ships in Bangla; English is the fallback. Layout
-   must survive Bangla text being ~15% wider and needing more line-height.
-2. **Mobile first.** This is a phone app. Design at 360–430px, then widen.
+   must survive Bangla text being ~15% wider with more line-height.
+2. **Mobile first.** Design at 360–430px, then widen. (The admin panel is the one
+   exception — see §14.4.)
 3. **One glance answers one question.** The dashboard's job is *"how much can I
    spend today?"* — that number is the largest thing on the screen.
-4. **Brand colour is for interaction. Data colour is for meaning.** Never use the
-   brand green to represent income, or a data colour on a button. This is the rule
-   that keeps a finance UI readable.
+4. **Brand colour is for interaction. Data colour is for meaning.** Never use brand
+   green for income, or a data colour on a button. This is the rule that keeps a
+   finance UI readable.
 5. **Money is never decoration.** Tabular figures, right-aligned in lists, two
-   decimals, always with `৳`.
-6. **Calm by default.** Red is reserved for over-budget and destructive actions —
-   not for every expense, or the app feels like a scolding.
+   decimals, always `৳`.
+6. **Calm by default.** Red is for over-budget and destructive actions only — not
+   for every expense, or the app feels like a scolding.
 
-### 10.2 Colour tokens
+### 12.2 Colour tokens
 
 `src/app/globals.css`:
 
@@ -1206,17 +2851,13 @@ export const usernameSchema = z.string()
   --color-brand-900: #00281D;
 
   /* ── data & status: meaning only ─────────────────────────────────────── */
-  --color-income:     #047857;
-  --color-income-bg:  #ECFDF5;
-  --color-expense:    #BE123C;
-  --color-expense-bg: #FFF1F2;
-  --color-warning:    #B45309;
-  --color-warning-bg: #FFFBEB;
-  --color-info:       #1D4ED8;
-  --color-info-bg:    #EFF6FF;
+  --color-income:     #047857;  --color-income-bg:  #ECFDF5;
+  --color-expense:    #BE123C;  --color-expense-bg: #FFF1F2;
+  --color-warning:    #B45309;  --color-warning-bg: #FFFBEB;
+  --color-info:       #1D4ED8;  --color-info-bg:    #EFF6FF;
 
-  /* budget health — deliberately the same three as above, so "critical"
-     and "expense" read as the same idea: money going the wrong way. */
+  /* budget health — deliberately the same three, so "critical" and
+     "expense" read as one idea: money going the wrong way. */
   --color-health-safe:     var(--color-income);
   --color-health-warning:  var(--color-warning);
   --color-health-critical: var(--color-expense);
@@ -1240,8 +2881,9 @@ export const usernameSchema = z.string()
   --ease-out: cubic-bezier(.16, 1, .3, 1);
 }
 
+/* System preference — guarded so an explicit light choice still wins. */
 @media (prefers-color-scheme: dark) {
-  @theme {
+  :root:not([data-theme="light"]) {
     --color-canvas:        #0B1310;
     --color-surface:       #121C18;
     --color-surface-sunken:#0E1714;
@@ -1250,27 +2892,24 @@ export const usernameSchema = z.string()
     --color-text:          #E8EFEB;
     --color-text-muted:    #9AAAA3;
     --color-text-subtle:   #6B7C75;
-
     --color-brand-600: #2FA987;   /* lighter fill so it reads on a dark ground */
     --color-brand-500: #4FC0A0;
-
-    --color-income:     #34D399;  --color-income-bg:  #04241B;
-    --color-expense:    #FB7185;  --color-expense-bg: #2A0E15;
-    --color-warning:    #FBBF24;  --color-warning-bg: #2A1E05;
-    --color-info:       #60A5FA;  --color-info-bg:    #0C1A33;
+    --color-income:  #34D399; --color-income-bg:  #04241B;
+    --color-expense: #FB7185; --color-expense-bg: #2A0E15;
+    --color-warning: #FBBF24; --color-warning-bg: #2A1E05;
+    --color-info:    #60A5FA; --color-info-bg:    #0C1A33;
   }
 }
+
+/* Explicit toggle — same block, so the switch wins in both directions. */
+:root[data-theme="dark"] { /* repeat the dark values above */ }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 ```
 
-Support both a system preference and an explicit toggle by also emitting the dark
-block under `[data-theme="dark"]`, and guarding the media block with
-`:root:not([data-theme="light"])`.
-
-### 10.3 Typography
+### 12.3 Typography
 
 Bangla and Latin need different fonts and different line-heights. Load both.
 
@@ -1278,17 +2917,10 @@ Bangla and Latin need different fonts and different line-heights. Load both.
 // src/app/fonts.ts
 import { Inter, Anek_Bangla } from "next/font/google";
 
-export const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-latin",
-  display: "swap",
-});
-
-export const anek = Anek_Bangla({
-  subsets: ["bengali", "latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-bangla",
-  display: "swap",
+export const inter = Inter({ subsets: ["latin"], variable: "--font-latin", display: "swap" });
+export const anek  = Anek_Bangla({
+  subsets: ["bengali", "latin"], weight: ["400", "500", "600", "700"],
+  variable: "--font-bangla", display: "swap",
 });
 ```
 
@@ -1298,8 +2930,8 @@ export const anek = Anek_Bangla({
   --font-number: var(--font-latin), ui-monospace, monospace;
 }
 
-/* Money and any column of figures. Tabular numerals stop digits from
-   shifting as values change — essential in a ledger. */
+/* Money and any column of figures. Tabular numerals stop digits shifting as
+   values change — essential in a ledger. */
 .tnum {
   font-family: var(--font-number);
   font-variant-numeric: tabular-nums;
@@ -1311,8 +2943,6 @@ export const anek = Anek_Bangla({
 :lang(bn) { line-height: 1.75; }
 :lang(en) { line-height: 1.55; }
 ```
-
-Scale (mobile → desktop):
 
 | Token | Size / line-height | Weight | Use |
 |---|---|---|---|
@@ -1326,122 +2956,222 @@ Scale (mobile → desktop):
 | `amount-lg` | 28/36 | 700 `.tnum` | Card headline figures |
 | `amount` | 17/24 | 600 `.tnum` | List rows |
 
-### 10.4 Spacing, radius, elevation
+### 12.4 Spacing, radius, elevation
 
 - Spacing scale: `4 · 8 · 12 · 16 · 20 · 24 · 32 · 40 · 48 · 64`. Screen gutter 16px
   mobile / 24px desktop.
-- Radius: cards `16`, buttons & inputs `12`, chips & avatars `full`, sheets `20` (top corners only).
-- Elevation: cards use `--shadow-sm`; sheets and popovers `--shadow-lg`. **In dark
-  mode use a lighter surface + border instead of a shadow** — shadows are invisible
-  on a dark ground.
+- Radius: cards `16`, buttons & inputs `12`, chips & avatars `full`, sheets `20`
+  (top corners only).
+- Elevation: cards `--shadow-sm`; sheets and popovers `--shadow-lg`. **In dark mode
+  use a lighter surface + border instead of a shadow** — shadows are invisible on a
+  dark ground.
 - Minimum touch target **44 × 44px**.
 
-### 10.5 Component specs
+### 12.5 Component specs
 
 | Component | Spec |
 |---|---|
-| **Button** | h44 (`lg` h52), radius 12, weight 600. Primary: `brand-600` fill, white text. Secondary: `surface` fill, `border` 1px. Ghost: transparent, `text-muted`. Destructive: `expense` fill. Focus: 2px `brand-500` ring, 2px offset. |
+| **Button** | h44 (`lg` h52), radius 12, weight 600. Primary: `brand-600` fill, white text. Secondary: `surface` fill, 1px `border`. Ghost: transparent, `text-muted`. Destructive: `expense` fill. Focus: 2px `brand-500` ring, 2px offset. |
 | **Input** | h48, radius 12, 1px `border`, 15px text. Focus: `brand-500` border + 3px `brand-100` ring. Error: `expense` border, message below in 13px `expense`. Label above, 13px 500. |
-| **Card** | `surface`, radius 16, `--shadow-sm`, padding 16 (20 on desktop). No border in light mode; 1px `border` in dark. |
+| **OTP input** | 6 boxes 48×56, radius 12, `.tnum` 20px centred, auto-advance, paste-aware, `inputmode="numeric"`, `autocomplete="one-time-code"`. |
+| **Card** | `surface`, radius 16, `--shadow-sm`, padding 16 (20 desktop). No border in light mode; 1px `border` in dark. |
 | **Stat tile** | Label 12px `text-subtle` uppercase `.05em` → value `amount-lg .tnum` → delta chip. |
 | **Amount** | `.tnum`. Income prefixed `+`, expense `−`. Colour only when the sign matters; otherwise `text`. |
 | **Category chip** | `background: {color}14` (8% alpha), `color: {color}`, radius full, h28, icon 14px + label 13px. |
 | **Progress (budget)** | h8, radius full, track `surface-sunken`, fill = health colour. Over 100%: fill 100% + a 2px `expense` cap. **Also render the percentage as text** — colour alone is not accessible. |
+| **Credit badge** | Pill, `brand-50` bg, `brand-700` text, `sparkles` icon + `.tnum` count. Used in the app bar and on every gated button. |
 | **Bottom nav** | Fixed, h64 + safe-area inset, `surface`, 1px top `border`. 4 items + a centre FAB. Active: `brand-600` icon + 11px label. |
 | **FAB** | 56×56, `brand-600`, `--shadow-lg`, centred and raised 12px above the nav. Opens Add Expense. |
 | **Sheet** | Bottom sheet on mobile, dialog ≥768px. Radius 20 top, drag handle, `--shadow-lg`. |
 | **Empty state** | Icon 48px `text-subtle`, `h3` title, `body-sm` muted line, one primary action. Never a bare "No data". |
 | **Skeleton** | `surface-sunken`, radius matching the real element, 1.4s shimmer. Match the real layout so nothing jumps. |
 
-### 10.6 Charts (Recharts)
+### 12.6 Charts (Recharts)
 
 - **Use `category.color` from the API** for every series. Never a hardcoded palette
-  — that is how the pie chart ends up disagreeing with the list beside it.
+  — that is how a pie chart ends up disagreeing with the list beside it.
 - Axes: `text-subtle` 11px, no vertical grid lines, horizontal grid `border` dashed.
-- Money axis: compact format (`৳2K`), tooltip shows the full `৳1,500.50`.
-- Bars: radius 6 top corners, 60% category gap.
-- Line: 2px stroke, no dots except on hover, gradient area at 12% → 0% opacity.
+- Money axis: compact (`৳2K`); tooltip shows the full `৳1,500.50`.
+- Bars: radius 6 top corners, 60% category gap. Line: 2px stroke, dots on hover
+  only, gradient area 12% → 0%.
 - Always render an accessible `<table class="sr-only">` of the same data.
 - Empty: show the axes and an inline message, never a blank box.
 
-### 10.7 Accessibility (required, not optional)
+### 12.7 Accessibility (required, not optional)
 
-- Text contrast ≥ 4.5:1, UI/graphics ≥ 3:1. The tokens above already satisfy this.
-- Never encode meaning in colour alone — pair every health colour with an icon or
-  a label (`Safe` / `Warning` / `Over budget`).
+- Text contrast ≥ 4.5:1, UI/graphics ≥ 3:1. The tokens above satisfy this.
+- Never encode meaning in colour alone — pair every health colour with an icon or a
+  label (`Safe` / `Warning` / `Over budget`).
 - Visible focus ring on every interactive element; never `outline: none`.
 - Every input has a `<label>`; errors linked via `aria-describedby` and
   `aria-invalid`.
 - Sheets and dialogs trap focus and close on `Escape`.
-- Respect `prefers-reduced-motion` (already in the CSS above).
-- `<html lang>` switches between `bn` and `en` so the right font and line-height apply.
-
-### 10.8 i18n and numerals
-
-- Default locale **`bn`**, fallback `en`. Send `Accept-Language` on every request so
-  the API's `message_bn` fields are meaningful.
-- **Digits stay Latin (`১২৩` → `123`) for money and dates.** Bengali numerals break
-  tabular alignment and are harder to scan in a ledger. Bangla text, Latin figures —
-  this matches how Bangladeshi banking apps actually present numbers.
-- Relative dates ("আজ", "গতকাল") for the last 7 days, absolute after that.
+- Respect `prefers-reduced-motion` (already in the CSS).
+- `<html lang>` switches between `bn` and `en` so the right font and line-height
+  apply (§11.4).
 
 ---
 
-## 11. Screens
+## 13. Screens — user app
 
-Build in this order — each depends on the previous.
+Build in the order of §3.
 
-| # | Route | Depends on | Notes |
+| # | Route | Endpoint | Notes |
 |---|---|---|---|
-| 1 | `/login` | §5.2 | identifier + password. Handle `requires_verification`. |
-| 2 | `/register` | §5.2 | name, phone, password. Live username check via §5.3. |
-| 3 | `/verify-otp` | §5.2 | 6 boxes, auto-advance, paste support, resend countdown from `resend_after_seconds`, show `attempts_left`. Dev banner for `dev_otp`. |
-| 4 | `/forgot-password`, `/reset-password` | §5.2 | Same OTP component. |
-| 5 | `/onboarding/[step]` | §5.3 | 4 steps driven by `onboarding_step`; resume where the user left off. |
-| 6 | `/` (dashboard) | §6 `GET /dashboard` | **Safe-to-spend is the hero number.** Then health bar, top categories, recent 5, AI insight card. |
-| 7 | `/expenses` | §6 | Infinite list grouped by day with daily subtotals. Filter sheet → §3.7 params. |
-| 8 | Add Expense sheet | §6 | FAB → amount pad → category grid → date → note. Target: under 5 seconds. |
-| 9 | `/analytics` | §6 | Week / Month / Year tabs. |
-| 10 | `/budget` | §6 | Per-category limits with progress bars. |
-| 11 | `/goals` | §6 | Progress rings, contribute sheet. |
-| 12 | `/settings` | §5.3, §5.2 | Profile, preferences, devices (§5.2 sessions), delete account. |
-| 13 | `/billing` | §5.4 | Current plan, wallet, ledger, plans, packs. |
-| 14 | Paywall sheet | §5.4 | **Global**, opened by any 402. Two tabs: Plans / Buy credits. Preselect per §3.3. |
+| 1 | `/[locale]/login` | §6.2.4 | identifier + password. Handle `requires_verification`. |
+| 2 | `/[locale]/register` | §6.2.1 | name, phone, password. Live username check via §6.3.1. |
+| 3 | `/[locale]/verify-otp` | §6.2.2, §6.2.3 | 6 boxes, auto-advance, paste, resend countdown, `attempts_left`. Dev banner for `dev_otp`. |
+| 4 | `/[locale]/forgot-password`, `/reset-password` | §6.2.6, §6.2.7 | Same OTP component. |
+| 5 | `/[locale]/onboarding/[step]` | §6.3.6 | 4 steps driven by the server's `onboarding_step`. |
+| 6 | `/[locale]/` (dashboard) | §7 `GET /dashboard` | **Safe-to-spend is the hero number.** Health bar, top categories, recent 5, AI insight card. |
+| 7 | `/[locale]/expenses` | §7 | Infinite list grouped by day with daily subtotals. Filter sheet → §4.7 params. |
+| 8 | Add Expense sheet | §7 | FAB → amount pad → category grid → date → note. Target: under 5 seconds. |
+| 9 | `/[locale]/analytics` | §7 | Week / Month / Year tabs. |
+| 10 | `/[locale]/budget` | §7 | Per-category limits with progress bars. |
+| 11 | `/[locale]/goals` | §7 | Progress rings, contribute sheet. |
+| 12 | `/[locale]/settings/*` | §6.3, §6.2 | Profile, preferences (language!), devices, change password, delete account. |
+| 13 | `/[locale]/billing` | §6.4 | Current plan, wallet, ledger, payments, plans, packs. |
+| 14 | Paywall sheet | §6.4 | **Global**, opened by any 402. Two tabs: Plans / Buy credits. |
 
-### 11.1 The paywall (most important commercial surface)
+### 13.1 The paywall (most important commercial surface)
 
-Opened centrally from the 402 handler in §9.2. It must:
+Opened centrally from the 402 handler in §10.2. It must:
 
 - Say **why** it opened, using `error.message` ("This uses 5 credits and you have 3.").
 - Preselect the right tab: `INSUFFICIENT_CREDITS`/`QUOTA_EXCEEDED` → **Buy credits**;
-  `SUBSCRIPTION_REQUIRED` → **Plans**, scrolled to `details.required_tier`.
-- Render plans from `GET /billing/plans` — never hardcode prices. Show
-  `monthly_price` as the headline, `price` as the total, and `savings_percent` as a
-  badge. Mark `is_popular`.
-- Render packs from `GET /billing/credit-packs`, showing `total_credits`
-  (credits + bonus) and `price_per_credit`.
-- Generate one idempotency key when the sheet opens; reuse it across retries.
+  `SUBSCRIPTION_REQUIRED` → **Plans**, scrolled to the required tier.
+- Render plans from `GET /billing/plans` — never hardcode prices. `monthly_price` as
+  the headline, `price` as the total, `savings_percent` as a badge, ribbon on
+  `is_popular`.
+- Render packs from `GET /billing/credit-packs` with `total_credits` and
+  `price_per_credit`.
+- Generate **one** idempotency key when the sheet opens; reuse it across retries.
 - After checkout, poll `GET /billing/me` until `plan_code` or `total_credits`
   changes, then invalidate `qk.billing()` and `qk.wallet()` and retry the original
   action.
 
 ---
 
-## 12. Definition of done
+## 14. Admin panel
+
+> **Status: the backend has no `/api/v1/admin/*` endpoints yet.** The `users.role`
+> column (`user` | `admin` | `support`) and an `ADMIN_API_KEY` config slot exist,
+> but no admin routes are mounted. So: build the shell, the guard and the tables
+> now against the contract in §14.2, keep `flags.admin = false`, and wire it up
+> when the endpoints land. Do not fake admin data in a way that could ship.
+
+### 14.1 Access model
+
+- Route group `/[locale]/admin/*`, guarded in a Server Component by
+  `GET /users/me` → `data.user.role === "admin"` (`support` gets read-only).
+- A non-admin gets a **404**, not a 403 — an admin area should not announce itself.
+- Admins use the same cookie session as the app. No second login.
+- Every destructive admin action requires a typed confirmation (like §6.3.7).
+
+### 14.2 Planned admin endpoints (contract, not yet built)
+
+| Method | Path | Returns |
+|---|---|---|
+| `GET` | `/admin/stats` | `AdminStats` — KPI header |
+| `GET` | `/admin/users` | `AdminUserRow[]` + `meta`; filters per §4.7 |
+| `GET` | `/admin/users/:id` | `AdminUserDetail` |
+| `PATCH` | `/admin/users/:id` | suspend / reactivate / unlock / change role |
+| `POST` | `/admin/users/:id/credits` | `{delta, reason}` → ledger `admin_adjust` |
+| `DELETE` | `/admin/users/:id/sessions` | force sign-out everywhere |
+| `GET` | `/admin/payments` | `Payment[]` + `meta`, filter by status/kind/date |
+| `POST` | `/admin/payments/:id/confirm` | manual settlement (replaces the sandbox route) |
+| `POST` | `/admin/payments/:id/refund` | `{amount, reason}` |
+| `GET` | `/admin/revenue` | time series for the revenue chart |
+| `GET` | `/admin/subscriptions` | `Subscription[]` + `meta` |
+| `GET/PATCH` | `/admin/plans[/:code]` | catalogue editing |
+| `GET/PATCH` | `/admin/credit-packs[/:code]` | catalogue editing |
+| `GET/PATCH` | `/admin/features[/:code]` | credit costs, tiers, active flag |
+| `GET` | `/admin/audit-logs` | `AuditLog[]` + `meta` |
+| `GET` | `/admin/feedback` | user feedback inbox |
+
+```ts
+export interface AdminStats {
+  users: { total: number; active: number; new_today: number; new_this_month: number;
+           verified: number; onboarded: number };
+  subscriptions: { active: number; trialing: number; cancelled_this_month: number;
+                   by_plan: Record<string, number> };
+  revenue: { today: number; this_month: number; last_month: number; lifetime: number;
+             mrr: number; arpu: number };
+  credits: { granted: number; purchased: number; used: number; outstanding: number };
+  ai: { calls_today: number; calls_this_month: number; top_features: { code: string; count: number }[] };
+  health: { db: boolean; redis: boolean; pending_payments: number; failed_payments_24h: number };
+}
+
+export interface AdminUserRow {
+  id: string; name: string; phone: string; username: string | null; email: string | null;
+  user_type: UserType; role: Role; status: "active" | "suspended" | "deleted";
+  plan_code: string; plan_expires_at?: string;
+  total_credits: number; lifetime_spent: number;
+  phone_verified: boolean; onboarding_step: OnboardingStep;
+  expense_count: number; last_seen_at?: string; created_at: string;
+  is_locked: boolean;
+}
+
+export interface AdminUserDetail extends AdminUserRow {
+  entitlement: Entitlement; wallet: Wallet;
+  subscription?: Subscription;
+  sessions: SessionInfo[];
+  recent_payments: Payment[];
+  recent_ledger: LedgerEntry[];
+  stats: ProfileStats;
+}
+```
+
+### 14.3 Screens
+
+| # | Route | Content |
+|---|---|---|
+| A1 | `/admin` | KPI row (users, MRR, active subs, credits outstanding) · revenue line chart (12 months) · signups bar chart (30 days) · plan-mix donut · "needs attention" list (pending payments, locked accounts, failed payments) |
+| A2 | `/admin/users` | Table: name+phone · plan chip · credits `.tnum` · status badge · last seen · joined. Search, filters (plan, status, user_type, verified, date range), CSV export. Row → detail drawer. |
+| A3 | `/admin/users/[id]` | Header (avatar, name, phone, plan, status) · tabs: **Overview** (stats, entitlement, wallet) · **Billing** (payments, ledger, subscription) · **Devices** (sessions, force sign-out) · **Danger** (suspend, unlock, adjust credits, change role) |
+| A4 | `/admin/payments` | Table with status filter; row actions Confirm / Refund; daily totals in `meta.extra`. |
+| A5 | `/admin/subscriptions` | Active / trialing / expiring-in-7-days / cancelled tabs. |
+| A6 | `/admin/catalogue` | Three tabs — Plans, Credit packs, Features. Inline edit of price, credits, `is_active`, `is_popular`, `credit_cost`, `min_tier`. **Every edit is a business decision: confirm before saving, and show the previous value.** |
+| A7 | `/admin/audit` | Audit log with actor, action, target, IP, time. Read-only. |
+
+### 14.4 Admin design differences
+
+The admin panel is the one place that is **desktop-first** — an operations person
+works on a laptop with many rows on screen.
+
+- Layout: fixed 240px left sidebar + content, max-width 1440px, 24px gutters.
+  Collapses to a drawer under 1024px; below 768px only the KPI cards and search
+  remain useful — that is acceptable.
+- Density: table row h44, 13px text, `.tnum` on every number column, sticky header,
+  sticky first column on horizontal scroll.
+- **Same tokens as the app.** No second theme. The admin panel is distinguished by
+  a `brand-800` sidebar and the word "Admin" in the app bar, nothing more.
+- Status badges reuse the health colours: active → income, suspended → warning,
+  deleted/failed → expense, pending → info.
+- Every table: server-side pagination (§4.7), URL-synced filters (so a filtered view
+  is shareable), a visible row count, and an empty state.
+- Destructive actions: red button, confirmation dialog naming the user, and the
+  reason field is **required** — it lands in the audit log.
+- Bangla and English both apply here too (`admin.json` namespace). Operations staff
+  often prefer English; the switcher still works.
+
+---
+
+## 15. Definition of done
 
 A screen is finished when all of these hold:
 
-- [ ] Loading state is a skeleton matching the real layout — no spinners on lists.
+- [ ] Loading state is a skeleton matching the real layout — no spinner on a list.
 - [ ] Empty state has an icon, a sentence and one action.
 - [ ] Every error path renders: field errors inline, 402 opens the paywall, 5xx
       shows the `request_id`.
-- [ ] Works at 360px wide with no horizontal scroll.
-- [ ] Works in Bangla, including long labels wrapping to two lines.
+- [ ] Works at 360px wide with no horizontal scroll (admin: 1024px).
+- [ ] Works in Bangla **and** English — no hardcoded string anywhere in the file.
 - [ ] Light and dark both readable; contrast checked.
 - [ ] Keyboard reachable end to end, focus visible.
 - [ ] Every money value uses `.tnum` and `formatBDT`.
 - [ ] No hardcoded colour, radius or spacing — tokens only.
-- [ ] No endpoint used that is not in §5 (or flag-gated from §6).
+- [ ] No endpoint used that is not in §6 (or flag-gated from §7/§14.2).
 
 ---
 
@@ -1451,7 +3181,7 @@ A screen is finished when all of these hold:
 BASE                 http://localhost:8080/api/v1
 Envelope             { success, code, message, data, meta?, errors?, hint?, request_id }
 Branch on            code (never message)
-Money in             string "1500.50"   Money out  number 1500.50
+Money in             string "1500.50"      Money out   number 1500.50
 Dates                calendar dates for transactions, instants for audit fields
 Auth                 httpOnly cookies via /api/hisabji proxy; never localStorage
 Refresh              single-flight only — parallel refresh = signed out everywhere
@@ -1459,4 +3189,42 @@ Paywall              any 402 → global sheet
 Icons                lucide names from the API
 Category colours     hex from the API — never your own
 Brand colour         interaction only, never data
+i18n                 i18next, /[locale]/ routes, bn default, en fallback
+Admin                role === "admin" from GET /users/me; endpoints not built yet
+```
+
+## Appendix B — curl cookbook
+
+```bash
+API=http://localhost:8080/api/v1
+P=01711111111 ; PW=hisabji2026
+
+# 1. register (dev_otp comes back in the response)
+curl -s -X POST $API/auth/register -H "Content-Type: application/json" \
+  -d "{\"name\":\"Rasel\",\"phone\":\"$P\",\"password\":\"$PW\",\"user_type\":\"job_holder\"}"
+
+# 2. verify (issues the first token pair)
+curl -s -X POST $API/auth/verify-otp -H "Content-Type: application/json" \
+  -d "{\"phone\":\"$P\",\"otp\":\"123456\"}"
+
+# 3. login and keep the token
+TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d "{\"identifier\":\"$P\",\"password\":\"$PW\"}" \
+  | grep -oE '"access_token":"[^"]*"' | cut -d'"' -f4)
+
+# 4. anything authenticated
+curl -s "$API/users/me?stats=true" -H "Authorization: Bearer $TOKEN"
+curl -s "$API/billing/me"          -H "Authorization: Bearer $TOKEN"
+curl -s "$API/billing/features/ai_monthly_coach/access" -H "Authorization: Bearer $TOKEN"
+
+# 5. buy credits end to end (sandbox)
+PID=$(curl -s -X POST $API/billing/credits/buy -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -H "X-Idempotency-Key: $(uuidgen)" \
+  -d '{"pack_code":"tokens_60"}' | grep -oE '"id":"[0-9a-f-]{36}"' | head -1 | cut -d'"' -f4)
+curl -s -X POST $API/billing/payments/confirm -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d "{\"payment_id\":\"$PID\"}"
+
+# rate-limited during development? clear just that rule and retry at once:
+bash scripts/reset-rate-limit.sh register
+bash scripts/reset-rate-limit.sh --list      # what is limited right now
 ```

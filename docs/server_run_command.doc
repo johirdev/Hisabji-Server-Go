@@ -1,126 +1,678 @@
-Hisabji Server চালানোর production-style command guide
-======================================================
+Hisabji Server — Step by Step Run, Migration, Seed ও Database Guide
+===================================================================
 
-প্রথমবার setup:
+এই ফাইলটি হলো প্রতিদিনের কাজের চেকলিস্ট। উপর থেকে নিচে order মেনে চললেই
+server, database, seed data এবং user টেবিল — সব ঠিকঠাক দাঁড়িয়ে যাবে।
 
-১. Docker Desktop চালু করুন।
-২. Project root-এ যান:
+Project root (সব command এখান থেকে চালাতে হবে):
 
-cd ~/Desktop/coders24/business/Hisabji/hisabji-server/Hisabji-Server
-
-৩. .env ফাইলে JWT_SECRET এবং OTP_SECRET-এর secure value দিন।
-৪. PostgreSQL, Redis এবং API একসাথে build/start করুন:
-
-docker compose up -d --build
-
-Service status দেখুন:
-
-docker compose ps
-
-API log দেখুন:
-
-docker compose logs -f api
-
-Server test করুন:
-
-curl http://localhost:8080/
-curl http://localhost:8080/health
-
-Expected health response:
-
-{"status":"ok"}
+    cd ~/Desktop/coders24/business/Hisabji/hisabji-server/Hisabji-Server
 
 
-পরেরবার server চালু করতে:
-=========================
+===================================================================
+এক নজরে — প্রতিদিন শুরুতে যা করবেন (Daily Quick Start)
+===================================================================
 
-docker compose up -d
+    docker compose up -d postgres redis      # ১. DB + Redis চালু
+    docker compose ps                        # ২. দুটোই healthy কিনা দেখুন
+    go run ./cmd/api                         # ৩. Server চালু (migration + seed auto)
+    curl http://localhost:8080/health        # ৪. নতুন terminal-এ health check
+    bash scripts/smoke.sh                    # ৫. পুরো API একবার test
 
-
-Docker + Air hot reload development mode:
-==========================================
-
-প্রথমবার অথবা code পরিবর্তনের পর:
-
-docker compose --profile dev up -d --build
-
-এই mode-এ source code container-এ mount হবে। Go file save করলেই Air server rebuild এবং restart করবে।
-
-Development log:
-
-docker compose logs -f api-dev
-
-Development status:
-
-docker compose --profile dev ps
-
-Development mode বন্ধ:
-
-docker compose --profile dev stop api-dev
-
-Production API চালানোর সময় আগে dev API বন্ধ করুন:
-
-docker compose --profile dev stop api-dev
-docker compose --profile prod up -d --build
-
-Production API বন্ধ:
-
-docker compose --profile prod stop api
-
-Code পরিবর্তনের পর নতুন image build করতে:
-
-docker compose up -d --build
+ব্যস। আলাদা করে migrate command বা seed command চালানোর দরকার নেই —
+কারণটা নিচের STEP 3-এ ব্যাখ্যা করা আছে।
 
 
-Server বন্ধ করতে:
-==================
+===================================================================
+STEP 0 — প্রথমবার (One-time setup)
+===================================================================
 
-Container বন্ধ রাখবে, কিন্তু data থাকবে:
+যা লাগবে:
 
-docker compose stop
+    Docker Desktop      (চালু থাকতে হবে)
+    Go 1.25 বা তার উপরে (এখন install আছে: go1.27.1)
 
-Container remove করবে, কিন্তু named volume data থাকবে:
+চেক করুন:
 
-docker compose down
+    go version
+    docker --version
 
-সবকিছু remove করতে, including PostgreSQL/Redis data:
+.env ফাইল তৈরি (আগে থেকে থাকলে skip করুন):
 
-docker compose down -v
+    cp .env.example .env
 
-সতর্কতা: down -v দিলে database এবং Redis-এর সব data মুছে যাবে।
+.env-এ অবশ্যই যেগুলো ঠিক রাখতে হবে:
 
+    DATABASE_URL=postgresql://postgres:johir@localhost:5432/hisabji
+    REDIS_URL=redis://localhost:6380/0
+    JWT_SECRET=<লম্বা random string>
+    OTP_SECRET=<লম্বা random string>
 
-Redis দেখা:
-===========
+গুরুত্বপূর্ণ: Postgres host port 5433 এবং Redis host port 6380 (5432/6379 নয়)।
+docker-compose.yml-এ ওভাবেই map করা আছে, তাই local Go server চালালে
+.env-এ 5433 / 6380 ই থাকতে হবে।
 
-docker compose exec redis redis-cli PING
-docker compose exec redis redis-cli SCAN 0 MATCH "rl:*" COUNT 100
-docker compose exec redis redis-cli DBSIZE
+Secret বানানোর সহজ উপায়:
 
+    openssl rand -hex 32
 
-PostgreSQL দেখা:
-================
-
-docker compose exec postgres psql -U postgres -d hisabji
-
-তারপর:
-
-SELECT * FROM users;
-SELECT * FROM phone_otps ORDER BY created_at DESC;
-SELECT * FROM login_attempts ORDER BY created_at DESC;
+সতর্কতা: production-এ "your-super-secret-..." জাতীয় default value রাখবেন না।
 
 
-শুধু infrastructure চালিয়ে local Go server চালানো:
-====================================================
+===================================================================
+STEP 1 — Database ও Redis চালু করা
+===================================================================
 
-docker compose up -d postgres redis
-go run ./cmd/api
+শুধু infrastructure (এটাই development-এর জন্য recommended):
 
-Local mode-এ .env-এর DATABASE_URL localhost:5432 এবং REDIS_URL localhost:6379 ব্যবহার হবে।
+    docker compose up -d postgres redis
+
+Status দেখুন — দুটোরই "healthy" দেখাতে হবে:
+
+    docker compose ps
+
+Expected:
+
+    hisabji-postgres   ... Up (healthy)   0.0.0.0:5433->5432/tcp
+    hisabji-redis      ... Up (healthy)   0.0.0.0:6380->6379/tcp
+
+Connection আলাদাভাবে test:
+
+    docker compose exec postgres pg_isready -U postgres -d hisabji
+    docker compose exec redis redis-cli PING          # PONG আসবে
+
+Log দেখতে:
+
+    docker compose logs -f postgres
+    docker compose logs -f redis
 
 
-পুরনো manual command-এর পরিবর্তে:
-===================================
+===================================================================
+STEP 2 — Server চালানো (তিনটি উপায়, যেকোনো একটি)
+===================================================================
 
-docker start hisabji-redis ব্যবহার করার প্রয়োজন নেই।
-Compose নিজে container তৈরি, start, stop এবং restart করবে।
+--- উপায় A: Local Go server (সবচেয়ে দ্রুত, daily development) -------
+
+    go run ./cmd/api
+
+বন্ধ করতে: Ctrl+C (graceful shutdown হবে, in-flight request শেষ করে থামবে)
+
+--- উপায় B: Air hot reload (Go file save করলেই auto rebuild) ---------
+
+এটাই daily development-এর জন্য সবচেয়ে আরামদায়ক। একবার install:
+
+    go install github.com/air-verse/air@v1.61.7
+
+তারপর প্রতিবার শুধু:
+
+    docker compose up -d postgres redis
+    air -c .air.toml
+
+এখন যেকোনো .go ফাইল save করলেই air নিজে থেকে rebuild করে server restart
+করবে। Terminal-এ দেখবেন: building... → running... → নতুন banner।
+
+Air বন্ধ করতে: Ctrl+C
+
+গুরুত্বপূর্ণ (Windows): .air.toml-এ binary-র নাম অবশ্যই main.exe হতে হবে —
+
+    bin = "tmp/main.exe"
+    cmd = "go build -o ./tmp/main.exe ./cmd/api"
+
+extension ছাড়া (tmp/main) লিখলে Windows এই error দেয়:
+
+    CMD will not recognize non .exe file for execution
+    'tmp\main' is not recognized as an internal or external command
+
+এটা এখন ঠিক করা আছে, পাশাপাশি send_interrupt = false এবং kill_delay = "2s"
+দেওয়া আছে — না দিলে প্রতি দ্বিতীয় rebuild-এ port 8080 ছাড়তে দেরি হয়ে
+"address already in use" error আসে।
+
+Rebuild-এর সময় মাঝে মাঝে এই warning আসতে পারে:
+
+    failed to remove tmp\main.exe, error: Access is denied.
+
+এটা ক্ষতিকর নয় — পুরনো process টা file handle ছাড়ার আগেই air মুছতে
+চেয়েছিল। পরের go build নিজেই file-টা overwrite করে দেয়।
+
+Docker-এর ভিতরে air চালাতে চাইলে (Dockerfile-এর development target-এ air আছে):
+
+    docker compose --profile dev up -d --build
+    docker compose logs -f api-dev
+    docker compose --profile dev stop api-dev        # বন্ধ করতে
+
+--- উপায় C: পুরো stack Docker-এ (production-এর মতো) -----------------
+
+    docker compose --profile prod up -d --build
+    docker compose logs -f api
+    docker compose --profile prod stop api           # বন্ধ করতে
+
+নোট: dev আর prod API একসাথে চালাবেন না — দুটোই 8080 port চায়।
+prod চালানোর আগে: docker compose --profile dev stop api-dev
+
+
+===================================================================
+STEP 3 — Migration ও Seed (আলাদা command লাগে না)
+===================================================================
+
+কীভাবে কাজ করে:
+
+  - migrations/*.sql ফাইলগুলো Go binary-র ভিতরে embed করা (migrations/embed.go)
+  - config-এ DB_AUTO_MIGRATE-এর default = true
+  - Server start হওয়ার সময় internal/infrastructure/database/migrate.go
+    pending migration গুলো filename order-এ, প্রতিটি নিজস্ব transaction-এ চালায়
+  - প্রতিটি applied migration schema_migrations টেবিলে version + checksum সহ লেখা থাকে
+  - Postgres advisory lock নেওয়া হয়, তাই একাধিক replica একসাথে start হলেও
+    migration একবারই চলে
+
+অর্থাৎ: `go run ./cmd/api` চালানোই migrate + seed চালানো।
+
+Migration ফাইলগুলো:
+
+    001_foundation.sql          users, sessions, otp_codes, login_attempts,
+                                audit_logs, idempotency_keys
+    002_transactions.sql        categories, recurring_rules, expenses, incomes
+    003_budgets_goals.sql       budgets, budget_limits, goals, goal_contributions
+    004_billing.sql             features, subscription_plans, credit_packs,
+                                subscriptions, credit_wallets, credit_ledger, payments
+    005_ai_notifications.sql    ai_insights, forecasts, notifications,
+                                user_devices, feedback
+    006_seed_reference_data.sql <-- এটাই SEED ফাইল
+
+006 seed-এ যা ঢোকে:
+
+    - ২১টি system expense category (খাবার, বাজার, যাতায়াত, বাসা ভাড়া, ...)
+    - ১০টি system income category (বেতন, ব্যবসার আয়, ফ্রিল্যান্স, ...)
+    - features catalogue (ai_quick_answer, ai_monthly_coach, business_cashflow, ...)
+    - subscription_plans (free, pro_3m, pro_6m, pro_12m)
+    - credit_packs (tokens_60 সহ)
+
+প্রতিটি insert-এ ON CONFLICT DO NOTHING আছে — তাই seed একবারই বসে,
+বারবার server restart করলে দাম বা credit cost overwrite হয়ে যাবে না।
+
+Migration সত্যিই বসেছে কিনা যাচাই:
+
+    docker compose exec postgres psql -U postgres -d hisabji -c "SELECT version, applied_at, duration_ms FROM schema_migrations ORDER BY version;"
+
+৬টা row আসতে হবে (001 থেকে 006)।
+
+Seed data যাচাই:
+
+    docker compose exec postgres psql -U postgres -d hisabji -c "SELECT 'categories' AS t, count(*) FROM categories WHERE is_system UNION ALL SELECT 'features', count(*) FROM features UNION ALL SELECT 'plans', count(*) FROM subscription_plans UNION ALL SELECT 'packs', count(*) FROM credit_packs;"
+
+Category list দেখতে:
+
+    docker compose exec postgres psql -U postgres -d hisabji -c "SELECT slug, name_bn, kind, is_fixed FROM categories WHERE is_system ORDER BY kind, sort_order;"
+
+Migration বন্ধ রেখে server চালাতে চাইলে (সাধারণত দরকার নেই):
+
+    DB_AUTO_MIGRATE=false go run ./cmd/api
+
+
+===================================================================
+STEP 4 — Server ঠিকমতো উঠেছে কিনা যাচাই
+===================================================================
+
+    curl http://localhost:8080/                 # API base ও version
+    curl http://localhost:8080/health           # DB + Redis সহ পুরো status
+    curl http://localhost:8080/health/live      # শুধু process বেঁচে আছে কিনা
+    curl http://localhost:8080/health/ready     # traffic নেওয়ার জন্য প্রস্তুত কিনা
+
+/health-এ "status":"ok" এবং database pool info থাকলে সব ঠিক।
+
+
+===================================================================
+STEP 5 — পুরো API একবারে test (Smoke test)
+===================================================================
+
+Server চালু থাকা অবস্থায়, নতুন terminal-এ (Git Bash):
+
+    bash scripts/smoke.sh
+
+অন্য port হলে:
+
+    BASE=http://localhost:8085 bash scripts/smoke.sh
+
+এটি নিজে নিজেই একটি নতুন user register করে, OTP verify করে, login,
+refresh, profile update, onboarding, billing (credit কেনা, subscribe,
+cancel), pagination এবং logout — সব পথ ধরে যায়। শেষে
+"ALL N CHECKS PASSED" দেখালে পুরো stack ঠিক আছে।
+
+Unit test চালাতে:
+
+    go test ./...
+    go test ./... -count=1 -v       # cache বাদ দিয়ে, বিস্তারিত সহ
+
+
+===================================================================
+STEP 6 — হাতে user তৈরি করা (users টেবিলে row বসানো)
+===================================================================
+
+API base: http://localhost:8080/api/v1
+
+--- ৬.১ Register ---------------------------------------------------
+
+    curl -s -X POST http://localhost:8080/api/v1/auth/register -H "Content-Type: application/json" -d "{\"name\":\"Rasel Ahmed\",\"phone\":\"01711111111\",\"password\":\"hisabji2026\",\"user_type\":\"job_holder\"}"
+
+Response-এ development mode-এ "dev_otp":"123456" থাকবে (OTP_EXPOSE_IN_DEV=true)।
+ওই ছয় সংখ্যাটাই পরের ধাপে লাগবে। SMS_PROVIDER=log হওয়ায় OTP server log-এও ছাপা হয়।
+
+--- ৬.২ OTP verify (এখানেই phone_verified=true হয় ও token পাওয়া যায়) ---
+
+    curl -s -X POST http://localhost:8080/api/v1/auth/verify-otp -H "Content-Type: application/json" -d "{\"phone\":\"01711111111\",\"otp\":\"123456\"}"
+
+--- ৬.৩ Login ------------------------------------------------------
+
+    curl -s -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" -d "{\"identifier\":\"01711111111\",\"password\":\"hisabji2026\"}"
+
+access_token কপি করে রাখুন:
+
+    TOKEN=<access_token এখানে বসান>
+
+--- ৬.৪ Token দিয়ে protected endpoint ------------------------------
+
+    curl -s "http://localhost:8080/api/v1/users/me?stats=true" -H "Authorization: Bearer $TOKEN"
+    curl -s http://localhost:8080/api/v1/billing/me     -H "Authorization: Bearer $TOKEN"
+    curl -s http://localhost:8080/api/v1/billing/wallet -H "Authorization: Bearer $TOKEN"
+
+--- ৬.৫ Profile ও onboarding ---------------------------------------
+
+    curl -s -X PATCH http://localhost:8080/api/v1/users/me -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"name\":\"Rasel Ahmed\",\"monthly_income\":30000}"
+
+    curl -s -X POST http://localhost:8080/api/v1/users/me/onboarding -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"step\":\"income\",\"monthly_income\":30000,\"month_start_day\":7}"
+
+    curl -s -X POST http://localhost:8080/api/v1/users/me/onboarding -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"step\":\"done\"}"
+
+--- সব endpoint এক নজরে ---------------------------------------------
+
+    Public
+      GET    /                                    GET  /health /health/live /health/ready
+      POST   /api/v1/auth/register                POST /api/v1/auth/login
+      POST   /api/v1/auth/verify-otp              POST /api/v1/auth/resend-otp
+      POST   /api/v1/auth/refresh                 POST /api/v1/auth/forgot-password
+      POST   /api/v1/auth/reset-password
+      GET    /api/v1/users/username-available
+      GET    /api/v1/billing/plans                GET  /api/v1/billing/credit-packs
+      GET    /api/v1/billing/features
+
+    Token লাগে
+      POST   /api/v1/auth/logout                  GET  /api/v1/auth/sessions
+      DELETE /api/v1/auth/sessions/:id            POST /api/v1/auth/change-password
+      GET    /api/v1/users/me                     PATCH/PUT /api/v1/users/me
+      PATCH  /api/v1/users/me/preferences         PUT  /api/v1/users/me/username
+      POST   /api/v1/users/me/onboarding          DELETE /api/v1/users/me
+      GET    /api/v1/billing/me                   GET  /api/v1/billing/wallet
+      GET    /api/v1/billing/ledger               GET  /api/v1/billing/payments
+      GET    /api/v1/billing/features/:code/access
+      POST   /api/v1/billing/subscribe            POST /api/v1/billing/credits/buy
+      POST   /api/v1/billing/subscription/cancel  POST /api/v1/billing/payments/confirm
+
+
+===================================================================
+STEP 7 — Database দেখা ও users টেবিল নিয়ে কাজ
+===================================================================
+
+!!! সবচেয়ে জরুরি কথা — আপনার মেশিনে দুইটা PostgreSQL চলছে !!!
+--------------------------------------------------------------
+
+    port 5432  →  Windows-এ install করা native PostgreSQL 17 service
+                  এখানে hisabji-র কোনো table নেই। কখনোই থাকবে না।
+
+    port 5433  →  Docker container (hisabji-postgres)
+                  এখানেই ২৭টা table, migration আর seed data আছে।
+                  আপনার server এখানেই connect করে (.env দেখুন)।
+
+pgAdmin / DBeaver / TablePlus-এ "table নাই" দেখালে ৯৯% ক্ষেত্রে আপনি
+৫৪৩২ পোর্টে connect করেছেন। Connection edit করে port ৫৪৩৩ দিন:
+
+    Host: localhost      Port: 5433
+    Database: hisabji    User: postgres      Password: johir
+
+যাচাই করার সবচেয়ে দ্রুত উপায় — নিচের command ২৭টা table দেখাবে:
+
+    docker compose exec postgres psql -U postgres -d hisabji -c "\dt"
+
+Seed ঠিক আছে কিনা এক নজরে (এখন যা আছে):
+
+    categories (system)  31
+    features             22
+    subscription_plans    6
+    credit_packs          4
+
+
+psql shell-এ ঢুকতে:
+
+    docker compose exec postgres psql -U postgres -d hisabji
+
+ভিতরে দরকারি meta-command:
+
+    \dt            সব টেবিলের list
+    \d users       users টেবিলের পুরো structure
+    \x             wide output on/off (row একটার নিচে একটা)
+    \q             বের হওয়া
+
+--- users টেবিলের দরকারি query -------------------------------------
+
+সব user সংক্ষেপে:
+
+    SELECT id, name, phone, user_type, role, status, phone_verified,
+           onboarding_step, plan_code, created_at
+    FROM users ORDER BY created_at DESC LIMIT 20;
+
+একজন user-এর সব কিছু:
+
+    SELECT * FROM users WHERE phone = '01711111111';
+
+মোট user সংখ্যা ও verified কতজন:
+
+    SELECT count(*) AS total,
+           count(*) FILTER (WHERE phone_verified) AS verified,
+           count(*) FILTER (WHERE deleted_at IS NOT NULL) AS deleted
+    FROM users;
+
+OTP গুলো (টেবিলের নাম otp_codes):
+
+    SELECT * FROM otp_codes ORDER BY created_at DESC LIMIT 10;
+
+Login attempt ও lock অবস্থা:
+
+    SELECT * FROM login_attempts ORDER BY created_at DESC LIMIT 10;
+    SELECT phone, failed_login_count, locked_until FROM users WHERE locked_until IS NOT NULL;
+
+Session (login করা device):
+
+    SELECT id, user_id, created_at, expires_at, revoked_at FROM sessions ORDER BY created_at DESC LIMIT 10;
+
+Billing:
+
+    SELECT * FROM credit_wallets;
+    SELECT * FROM credit_ledger ORDER BY created_at DESC LIMIT 10;
+    SELECT * FROM subscriptions ORDER BY created_at DESC LIMIT 10;
+    SELECT * FROM payments ORDER BY created_at DESC LIMIT 10;
+
+--- হাতে user সংশোধন (development-এ কাজে লাগে) ----------------------
+
+Lock খুলে দেওয়া:
+
+    UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE phone = '01711111111';
+
+OTP ছাড়াই phone verified করে দেওয়া:
+
+    UPDATE users SET phone_verified = true, phone_verified_at = now() WHERE phone = '01711111111';
+
+Admin বানানো:
+
+    UPDATE users SET role = 'admin' WHERE phone = '01711111111';
+
+Test user মুছে ফেলা (cascade-এ ওর expense/session সবও যাবে):
+
+    DELETE FROM users WHERE phone = '01711111111';
+
+সব test user একবারে মুছতে (reference/seed data ঠিক থাকবে):
+
+    DELETE FROM users;
+
+মনে রাখবেন: monthly_income টেবিলে paisa (BDT-র minor unit)-এ রাখা হয়,
+কিন্তু API 30000.00 এভাবে টাকায় দেখায়। সরাসরি SQL দিয়ে বসালে ১০০ গুণ করে দেবেন।
+
+--- terminal থেকে এক লাইনে query (psql-এ না ঢুকে) -------------------
+
+    docker compose exec postgres psql -U postgres -d hisabji -c "SELECT phone, name, plan_code FROM users;"
+
+--- Backup ও restore ------------------------------------------------
+
+    docker compose exec postgres pg_dump -U postgres -d hisabji > backup.sql
+    docker compose exec -T postgres psql -U postgres -d hisabji < backup.sql
+
+
+===================================================================
+STEP 8 — Redis দেখা
+===================================================================
+
+    docker compose exec redis redis-cli PING
+    docker compose exec redis redis-cli DBSIZE
+
+Rate limit bucket গুলো (prefix hisabji:rl):
+
+    docker compose exec redis redis-cli --scan --pattern "hisabji:rl:*"
+
+Revoke করা token / logout হওয়া session:
+
+    docker compose exec redis redis-cli --scan --pattern "hisabji:revoked:*"
+
+Rate limit নিয়ে সব কিছু পরের STEP-এ আলাদা করে দেওয়া আছে।
+
+
+===================================================================
+STEP 8.5 — Rate limit: দেখা, reset করা, বাড়ানো, বন্ধ করা
+===================================================================
+
+এই error টা development-এ সবচেয়ে বেশি বিরক্ত করে:
+
+    {"code":"RATE_LIMIT_EXCEEDED",
+     "message":"Too many requests. Please wait 51 minutes and try again.",
+     "details":{"limit":5,"retry_after_seconds":3057,"window_seconds":3600}}
+
+কারণ: /auth/register-এ প্রতি IP-তে ঘণ্টায় মাত্র ৫ বার। Testing করতে গেলে
+৫টা account বানানোর পরেই আটকে যায়। নিচের যেকোনো একটা করুন।
+
+
+--- সবচেয়ে সহজ: reset script (নতুন) --------------------------------
+
+    bash scripts/reset-rate-limit.sh --list       # এখন কোনটা কতবার হয়েছে
+    bash scripts/reset-rate-limit.sh register     # শুধু register-এর limit clear
+    bash scripts/reset-rate-limit.sh auth         # সব auth rule একসাথে
+    bash scripts/reset-rate-limit.sh              # সব rule clear
+    bash scripts/reset-rate-limit.sh --help       # সব rule-এর নাম
+
+Clear করার সাথে সাথেই আবার request পাঠাতে পারবেন, অপেক্ষা করতে হবে না।
+
+যে নাম গুলো দিতে পারবেন:
+
+    register  login  verify  resend  refresh  forgot  reset-password
+    global    profile  preferences  onboarding
+    username  subscribe  buy  confirm  cancel  password  delete-account
+    auth      write     strict          (পুরো family একসাথে)
+
+উদাহরণ output:
+
+    $ bash scripts/reset-rate-limit.sh register
+    Cleared 2 bucket(s) for auth:register.
+    Retry the request — the limit is gone.
+
+কেন ২টা bucket? Limiter টা sliding window — প্রতিটি rule-এর জন্য দুইটা
+Redis key রাখে (এখনকার সময়-স্লট আর তার আগেরটা, weight সহ)। তাই শুধু
+একটা key মুছলে আগেরটা এখনও গুনতে থাকে। Script দুইটাই মোছে।
+
+
+--- script ছাড়া, হাতে করতে চাইলে ------------------------------------
+
+সব rate limit key দেখুন:
+
+    docker compose exec redis redis-cli --scan --pattern "hisabji:rl:*"
+
+Key-এর গঠন:
+
+    hisabji:rl:<rule>:<scope>:<id>:<time-slot>
+    hisabji:rl:auth:register:ip:::1:496966
+              └─ rule ─┘  └scope┘└IP┘ └slot┘
+
+শুধু register clear (Linux/Git Bash):
+
+    docker compose exec -T redis sh -c \
+      "redis-cli --scan --pattern 'hisabji:rl:auth:register:*' | xargs -r redis-cli DEL"
+
+একদম সব Redis data মুছতে (rate limit + revoked token, সব):
+
+    docker compose exec redis redis-cli FLUSHDB
+
+সতর্কতা: FLUSHDB দিলে logout হওয়া token-এর তালিকাও মুছে যাবে। Development-এ
+সমস্যা নেই, কিন্তু reset script ব্যবহার করাই ভালো — ওটা শুধু rate limit
+key গুলোই মোছে।
+
+
+--- Development-এ rate limit পুরো বন্ধ রাখা (সবচেয়ে আরামদায়ক) --------
+
+    RATE_LIMIT_ENABLED=false go run ./cmd/api
+
+অথবা .env-এ স্থায়ীভাবে:
+
+    RATE_LIMIT_ENABLED=false
+
+Air দিয়ে চালালে .env-এই লিখতে হবে।
+
+সতর্কতা: production-এ কখনো false করবেন না। তখন brute-force login,
+OTP flood আর SMS bill — তিনটাই খোলা থাকবে।
+
+
+--- Limit বাড়ানো: কোনগুলো .env দিয়ে বদলানো যায় ---------------------
+
+এই পাঁচটা .env দিয়েই বদলানো যায় (server restart লাগবে):
+
+    RATE_LIMIT_ENABLED=true            চালু / বন্ধ
+    RATE_LIMIT_GLOBAL_PER_MIN=300      /api/v1-এর সব request, প্রতি IP প্রতি মিনিট
+    RATE_LIMIT_AUTH_PER_MIN=10         login, প্রতি IP প্রতি মিনিট
+    RATE_LIMIT_WRITE_PER_MIN=60        profile / preferences / onboarding update,
+                                       প্রতি user প্রতি মিনিট
+    RATE_LIMIT_AI_PER_HOUR=30          AI endpoint, প্রতি user প্রতি ঘণ্টা
+
+App-এ হিসাব-নিকাশ বেশি হলে বা একটা screen একসাথে অনেক request পাঠালে
+আসলে এই দুইটাই বাড়াতে হয়:
+
+    RATE_LIMIT_GLOBAL_PER_MIN=1000
+    RATE_LIMIT_WRITE_PER_MIN=200
+
+Development-এর জন্য .env-এ এই block টা দিয়ে রাখতে পারেন:
+
+    RATE_LIMIT_ENABLED=true
+    RATE_LIMIT_GLOBAL_PER_MIN=2000
+    RATE_LIMIT_AUTH_PER_MIN=100
+    RATE_LIMIT_WRITE_PER_MIN=500
+    RATE_LIMIT_AI_PER_HOUR=200
+
+
+--- যেগুলো .env দিয়ে বদলানো যায় না (code-এ লেখা) --------------------
+
+নিচের limit গুলো ইচ্ছাকৃতভাবে code-এ hardcode করা, কারণ এগুলো টাকা আর
+নিরাপত্তার সাথে জড়িত — ভুল করে .env-এ বড় সংখ্যা দিলে যাতে বিপদ না হয়:
+
+    auth/routes.go
+      register        5 / ঘণ্টা / IP     ← আপনি এটাতেই আটকেছেন
+      verify-otp     15 / মিনিট / IP
+      resend-otp      5 / ১০ মিনিট / IP  (প্রতিটি SMS-এ টাকা যায়)
+      refresh        60 / ঘণ্টা / IP
+      forgot-password 5 / ঘণ্টা / IP
+      reset-password 10 / ঘণ্টা / IP
+      change-password 5 / ঘণ্টা / user
+
+    user/routes.go
+      username        5 / ঘণ্টা / user
+      delete-account  3 / দিন / user
+
+    billing/routes.go
+      subscribe      10 / ঘণ্টা / user
+      credits/buy    20 / ঘণ্টা / user
+      subscription/cancel 5 / ঘণ্টা / user
+      payments/confirm   30 / ঘণ্টা / user
+
+Development-এ এগুলোর জন্য reset script অথবা RATE_LIMIT_ENABLED=false
+ব্যবহার করুন। সংখ্যা বদলাতে চাইলে সরাসরি ওই routes.go ফাইলে বদলান —
+কিন্তু production-এ register 5/ঘণ্টা রাখাই ঠিক, কারণ ওটাই ভুয়া account
+আর SMS bill ঠেকায়।
+
+
+===================================================================
+STEP 9 — Reset করা (নতুন করে শুরু)
+===================================================================
+
+--- শুধু data মুছে schema রাখা ------------------------------------
+
+    docker compose exec postgres psql -U postgres -d hisabji -c "TRUNCATE users CASCADE;"
+
+--- পুরো database নতুন করে বানানো ---------------------------------
+
+    docker compose exec postgres psql -U postgres -c "DROP DATABASE hisabji;"
+    docker compose exec postgres psql -U postgres -c "CREATE DATABASE hisabji;"
+    go run ./cmd/api        # migration + seed আবার চলে যাবে
+
+(নোট: কিছু error message-এ `make db-reset` লেখা আছে, কিন্তু Makefile এখনো
+খালি — তাই উপরের দুই লাইনই এখন আসল কাজটা করে।)
+
+--- Container ও volume সহ সব মুছে ফেলা ----------------------------
+
+    docker compose down          # container যাবে, data volume থাকবে
+    docker compose down -v       # data volume সহ সব মুছে যাবে
+
+সতর্কতা: down -v দিলে Postgres ও Redis-এর সব data চলে যাবে।
+
+--- শুধু বন্ধ রাখা (data অক্ষত) ------------------------------------
+
+    docker compose stop
+    docker compose start
+
+
+===================================================================
+STEP 10 — সমস্যা হলে (Troubleshooting)
+===================================================================
+
+pgAdmin-এ database-এ কোনো table দেখছি না / seed হয়নি মনে হচ্ছে
+    আপনি native PostgreSQL (port 5432)-এ connect করেছেন। Docker-এর
+    PostgreSQL হলো port 5433। STEP 7-এর উপরের সতর্কবার্তা দেখুন।
+
+Air চালাতে গিয়ে "is not recognized as an internal or external command"
+    .air.toml-এ bin/cmd-এ .exe extension নেই। ঠিক করা আছে; STEP 2 দেখুন।
+
+"DATABASE_URL is required"
+    .env ফাইল নেই বা root থেকে চালাচ্ছেন না। cp .env.example .env করুন।
+
+Connection refused / dial tcp 127.0.0.1:5433
+    Postgres container চালু নেই → docker compose up -d postgres redis
+    অথবা .env-এ port 5432 লেখা আছে; 5433 হতে হবে।
+
+"port 8080 already in use" / "the server could not start"
+    আগের একটা server চলছে। Docker-এর api বা api-dev বন্ধ করুন,
+    অথবা: PORT=8085 go run ./cmd/api
+
+"migration 00X_....sql has changed since it was applied"
+    Apply হয়ে যাওয়া migration ফাইল edit করা হয়েছে। নিয়ম: applied migration
+    কখনো edit করবেন না, নতুন ফাইল যোগ করুন। Development data ফেলনা হলে
+    STEP 9-এর মতো database drop করে নতুন করে বানান।
+
+"this database was created by the old bootstrap schema"
+    পুরনো schema-র উপর নতুন migration বসাতে গেলে এই error। STEP 9-এর
+    DROP DATABASE / CREATE DATABASE চালান।
+
+429 Too Many Requests / RATE_LIMIT_EXCEEDED
+    bash scripts/reset-rate-limit.sh register
+    বিস্তারিত STEP 8.5-এ।
+
+"The service is temporarily unable to process requests"
+    Redis down (REDIS_FAIL_OPEN=false, তাই fail-closed)।
+    docker compose up -d redis চালান।
+
+OTP পাচ্ছি না
+    Development-এ register/resend response-এর "dev_otp" ফিল্ডেই OTP থাকে;
+    server log-এও ছাপা হয় (SMS_PROVIDER=log)।
+
+Login করতে দিচ্ছে না, requires_verification আসছে
+    আগে /auth/verify-otp দিয়ে phone verify করতে হবে (REQUIRE_PHONE_VERIFY=true)।
+
+
+===================================================================
+পরিশিষ্ট — দরকারি environment variable (সব default config.go-তে)
+===================================================================
+
+    APP_ENV=development              PORT=8080
+    DATABASE_URL=...                 REDIS_URL=...
+    DB_AUTO_MIGRATE=true             REDIS_KEY_PREFIX=hisabji
+    JWT_SECRET=...                   OTP_SECRET=...
+    REQUIRE_PHONE_VERIFY=true        OTP_EXPOSE_IN_DEV=true
+    ACCESS_TOKEN_TTL=30m             REFRESH_TOKEN_TTL=720h
+    MAX_LOGIN_ATTEMPTS=5             LOGIN_LOCK_WINDOW=6h
+    RATE_LIMIT_ENABLED=true          RATE_LIMIT_AUTH_PER_MIN=10
+    SMS_PROVIDER=log                 PAYMENT_PROVIDER=manual (sandbox)
+    LOG_LEVEL=debug                  LOG_FORMAT=text
+    CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+
+যেকোনো variable এক দফার জন্য override করা যায়:
+
+    LOG_LEVEL=info RATE_LIMIT_ENABLED=false go run ./cmd/api

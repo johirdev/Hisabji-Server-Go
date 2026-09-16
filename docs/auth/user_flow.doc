@@ -44,7 +44,7 @@ docker run -d --name hisabji-redis --restart unless-stopped -p 6379:6379 -v hisa
 
 APP_ENV=development
 PORT=8080
-DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/hisabji
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5433/hisabji
 REDIS_URL=redis://localhost:6379/0
 JWT_SECRET=your-long-random-jwt-secret
 OTP_SECRET=your-long-random-otp-secret

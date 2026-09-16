@@ -2,15 +2,25 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  bin = "tmp/main"
-  cmd = "go build -o ./tmp/main ./cmd/api"
+  # Windows will not execute a file without the .exe extension, so both the
+  # build output and the binary air runs must carry it. On Linux and macOS the
+  # extension is meaningless but harmless, which keeps this file cross-platform.
+  bin = "tmp/main.exe"
+  cmd = "go build -o ./tmp/main.exe ./cmd/api"
+
   delay = 500
-  exclude_dir = ["tmp", "vendor", "docs", ".git"]
+  exclude_dir = ["tmp", "vendor", "docs", ".git", "scripts"]
   exclude_regex = ["_test.go"]
-  include_ext = ["go", "env"]
-  kill_delay = "500ms"
+  include_ext = ["go", "env", "sql", "toml"]
+
+  # Windows has no SIGINT to send to another process, so air kills the old
+  # server outright. kill_delay gives the OS time to release port 8080 before
+  # the new binary tries to bind it — without it every second rebuild fails
+  # with "address already in use".
+  send_interrupt = false
+  kill_delay = "2s"
+
   log = "tmp/air-build-errors.log"
-  send_interrupt = true
   stop_on_error = true
 
 [log]

@@ -1,0 +1,24 @@
+# Air's build output — a 21 MB binary rebuilt on every save.
+tmp/
+*.exe
+
+# Local secrets. Only .env.example belongs in the repository.
+.env
+.env.local
+.env.*.local
+
+# Hand-made backups of local files — .env.bak would otherwise leak credentials.
+*.bak
+
+# Go
+vendor/
+*.test
+*.out
+coverage.*
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
